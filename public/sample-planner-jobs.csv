@@ -1,0 +1,17 @@
+faNumber,project,articleNo,step,fixture,qty,anlageMin,schlosserMin,ruestzeitMin,alreadyTacked,priority,force,hold,optic,wireNumber
+FA-260828-001,Pesa,95,0,VR-1,1,55,80,15,true,true,false,false,ALO,14316
+FA-260828-002,Pesa,95,1,VR-1,1,30,45,0,false,false,false,false,ALO,14316
+FA-260828-003,Pesa,95,2,VR-1,1,80,110,10,false,false,false,false,BEO,14316
+FA-260828-004,Pesa,95,3,VR-1,1,35,45,0,false,false,false,false,BEO,14316
+FA-260828-005,Pesa,95,4,VR-1,1,150,190,20,false,false,false,false,ALO,14316
+FA-260828-006,Pesa,99,0,VR-2,1,45,70,15,false,true,false,false,ALO,14318
+FA-260828-007,Pesa,99,1,VR-2,2,30,45,0,false,false,false,false,ALO,14318
+FA-260828-008,Pesa,99,2,VR-2,1,95,130,10,false,false,false,false,BEO,14318
+FA-260828-009,Pesa,99,4,VR-2,1,165,210,25,false,false,false,false,ALO,14318
+FA-260828-010,BVG,102,0,VR-3,1,60,85,15,true,false,false,false,ALO,14320
+FA-260828-011,BVG,102,1,VR-3,1,35,50,0,false,false,false,false,ALO,14320
+FA-260828-012,BVG,102,2,VR-3,1,120,150,15,false,false,false,false,BEO,14320
+FA-260828-013,BVG,103,0,VR-1,1,50,70,15,false,false,false,false,ALO,14321
+FA-260828-014,BVG,103,1,VR-1,1,30,50,0,false,false,false,false,ALO,14321
+FA-260828-015,Pesa,115,5,VR-2,2,40,60,0,false,false,false,true,ALO,14319
+FA-260828-016,Pesa,115,6,VR-2,1,40,65,0,false,false,false,true,ALO,14319
