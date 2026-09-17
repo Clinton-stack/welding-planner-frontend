@@ -1,0 +1,139 @@
+[
+  {
+    "faNumber": "FA2610200",
+    "projekt": "PESA",
+    "artikelNummer": "95",
+    "schritt": 1,
+    "vorrichtung": 1,
+    "anlageMinutes": 55,
+    "schlosserMinutes": 0,
+    "schonGeheftet": true,
+    "isPriority": true
+  },
+  {
+    "faNumber": "FA2610200",
+    "projekt": "PESA",
+    "artikelNummer": "95",
+    "schritt": 2,
+    "vorrichtung": 1,
+    "anlageMinutes": 90,
+    "schlosserMinutes": 115
+  },
+  {
+    "faNumber": "FA2610200",
+    "projekt": "PESA",
+    "artikelNummer": "95",
+    "schritt": 3,
+    "vorrichtung": 1,
+    "anlageMinutes": 95,
+    "schlosserMinutes": 120
+  },
+  {
+    "faNumber": "FA2610200",
+    "projekt": "PESA",
+    "artikelNummer": "95",
+    "schritt": 4,
+    "vorrichtung": 1,
+    "anlageMinutes": 150,
+    "schlosserMinutes": 185
+  },
+  {
+    "faNumber": "FA2610200",
+    "projekt": "PESA",
+    "artikelNummer": "95",
+    "schritt": 5,
+    "vorrichtung": 1,
+    "anlageMinutes": 45,
+    "schlosserMinutes": 60
+  },
+  {
+    "faNumber": "FA2610201",
+    "projekt": "BVG",
+    "artikelNummer": "102",
+    "schritt": 1,
+    "vorrichtung": 2,
+    "anlageMinutes": 70,
+    "schlosserMinutes": 90
+  },
+  {
+    "faNumber": "FA2610201",
+    "projekt": "BVG",
+    "artikelNummer": "102",
+    "schritt": 2,
+    "vorrichtung": 2,
+    "anlageMinutes": 110,
+    "schlosserMinutes": 140
+  },
+  {
+    "faNumber": "FA2610201",
+    "projekt": "BVG",
+    "artikelNummer": "102",
+    "schritt": 3,
+    "vorrichtung": 2,
+    "anlageMinutes": 115,
+    "schlosserMinutes": 145
+  },
+  {
+    "faNumber": "FA2610201",
+    "projekt": "BVG",
+    "artikelNummer": "102",
+    "schritt": 4,
+    "vorrichtung": 2,
+    "anlageMinutes": 175,
+    "schlosserMinutes": 220
+  },
+  {
+    "faNumber": "FA2610201",
+    "projekt": "BVG",
+    "artikelNummer": "102",
+    "schritt": 5,
+    "vorrichtung": 2,
+    "anlageMinutes": 55,
+    "schlosserMinutes": 70
+  },
+  {
+    "faNumber": "FA2610202",
+    "projekt": "GINA",
+    "artikelNummer": "115",
+    "schritt": 1,
+    "vorrichtung": 3,
+    "anlageMinutes": 75,
+    "schlosserMinutes": 95
+  },
+  {
+    "faNumber": "FA2610202",
+    "projekt": "GINA",
+    "artikelNummer": "115",
+    "schritt": 2,
+    "vorrichtung": 3,
+    "anlageMinutes": 105,
+    "schlosserMinutes": 135
+  },
+  {
+    "faNumber": "FA2610202",
+    "projekt": "GINA",
+    "artikelNummer": "115",
+    "schritt": 3,
+    "vorrichtung": 3,
+    "anlageMinutes": 125,
+    "schlosserMinutes": 155
+  },
+  {
+    "faNumber": "FA2610202",
+    "projekt": "GINA",
+    "artikelNummer": "115",
+    "schritt": 4,
+    "vorrichtung": 3,
+    "anlageMinutes": 180,
+    "schlosserMinutes": 220
+  },
+  {
+    "faNumber": "FA2610202",
+    "projekt": "GINA",
+    "artikelNummer": "115",
+    "schritt": 5,
+    "vorrichtung": 3,
+    "anlageMinutes": 65,
+    "schlosserMinutes": 80
+  }
+]
