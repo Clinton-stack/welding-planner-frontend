@@ -1,0 +1,16 @@
+faNumber,projekt,artikelNummer,schritt,vorrichtung,menge,anlageMinutes,schlosserMinutes,jobType,schonGeheftet,isPriority,isForced,isHeld
+FA900100,PESA,99,1,1,1,25,30,production,false,false,false,false
+FA900100,PESA,99,2,1,1,75,120,production,false,false,false,false
+FA900100,PESA,99,4,1,1,130,200,production,false,false,false,false
+FA900200,PESA,92,4,3,1,90,0,production,true,false,false,false
+FA900200,PESA,92,5,3,1,35,45,production,false,false,false,false
+FA900300,BVG,102,1,2,1,45,60,production,false,true,false,false
+FA900300,BVG,102,2,2,1,110,150,production,false,true,false,false
+FA900300,BVG,102,4,2,1,170,220,production,false,true,false,false
+FA900400,GINA,115,1,3,1,60,75,production,false,false,false,false
+FA900400,GINA,115,2,3,1,95,130,production,false,false,false,false
+FA900500,JANA,103,1,1,1,55,70,production,false,false,false,false
+FA900500,JANA,103,2,1,1,100,140,production,false,false,false,false
+FA900600,PESA,91,5,2,1,40,50,production,false,false,false,false
+FA900700,PESA,95,1,3,1,50,65,production,false,false,false,false
+FA900800,BVG,100,3,1,1,80,0,production,true,false,false,false

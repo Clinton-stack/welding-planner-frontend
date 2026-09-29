@@ -1,0 +1,8 @@
+faNumber,projekt,artikelNummer,schritt,vorrichtung,menge,anlageMinutes,schlosserMinutes,jobType,schonGeheftet,isPriority,isForced,isHeld
+FA12837,PESA,99,1,1,1,20,20,production,false,false,false,false
+FA329783,PESA,92,4,3,1,90,0,production,true,false,false,false
+FA1278313,PESA,91,5,2,1,30,40,production,false,false,false,false
+FA12837,PESA,99,2,1,1,80,140,production,false,false,false,false
+FA329783,PESA,92,5,3,1,30,40,production,false,false,false,false
+Fa68t126,PESA,93,1,2,1,30,40,production,false,false,false,false
+FA12837,PESA,99,4,1,1,120,200,production,false,false,false,false

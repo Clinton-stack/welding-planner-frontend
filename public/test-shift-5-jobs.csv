@@ -1,0 +1,6 @@
+faNumber,projekt,artikelNummer,schritt,vorrichtung,menge,anlageMinutes,schlosserMinutes,schonGeheftet,isPriority,isForced,isHeld,jobType
+FA2611155,PESA,95,1,1,1,55,0,true,true,false,false,production
+FA2611155,PESA,95,2,1,1,95,115,false,true,false,false,production
+FA2611155,PESA,95,3,1,1,75,90,false,true,false,false,production
+FA2611198,BVG,102,1,2,1,70,90,false,false,false,false,production
+FA2611198,BVG,102,2,2,1,120,150,false,false,false,false,production

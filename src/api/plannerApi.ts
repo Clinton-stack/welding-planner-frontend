@@ -1,6 +1,7 @@
 export type ShiftCode = 'F' | 'S' | 'N'
 export type JobStatus = 'open' | 'running' | 'done' | 'blocked'
 export type JobType = 'production' | 'repair'
+export type ApprovalStatus = 'none' | 'pending' | 'approved' | 'rejected'
 
 export type Robot = {
   id: string
@@ -31,6 +32,14 @@ export type Job = {
   isPriority: boolean
   isForced: boolean
   isHeld: boolean
+  approvalStatus?: ApprovalStatus
+  createdByName?: string | null
+  createdByRole?: string | null
+  approvedByName?: string | null
+  approvedAt?: string | null
+  rejectedByName?: string | null
+  rejectedAt?: string | null
+  approvalNote?: string | null
   status: JobStatus
   shift: ShiftCode
   date: string
@@ -88,6 +97,8 @@ export type ShiftSimulation = {
   shift: ShiftCode
   workingMinutes: number
   targetRobotMinutes: number
+  lockedJobs?: Job[]
+  lockedRobotMinutes?: number
   plannedJobs: PlannedJobTimeline[]
   rolloverJobs: Job[]
   warnings: string[]
@@ -147,6 +158,22 @@ export async function createRobot(payload: Omit<Robot, 'id' | 'isActive'> & { is
   })
 }
 
+export async function ensureKnownRobots(): Promise<Robot[]> {
+  const existingRobots = await getRobots()
+  const existingAssetIds = new Set(existingRobots.map((robot) => robot.assetId.toUpperCase()))
+  const createdRobots: Robot[] = []
+
+  for (const robot of knownRobots) {
+    if (existingAssetIds.has(robot.assetId.toUpperCase())) {
+      continue
+    }
+
+    createdRobots.push(await createRobot({ ...robot, isActive: true }))
+  }
+
+  return [...existingRobots, ...createdRobots]
+}
+
 export async function getJobs(filters: { robotId?: string; date?: string } = {}): Promise<Job[]> {
   const params = new URLSearchParams()
 
@@ -165,6 +192,13 @@ export async function createJob(payload: CreateJobPayload): Promise<Job> {
 
 export async function updateJob(id: string, payload: Partial<Job>): Promise<Job> {
   return apiFetch(`/jobs/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateJobSuProgress(id: string, payload: { nextShift: ShiftCode; progressPercent: number }): Promise<Job> {
+  return apiFetch(`/jobs/${id}/su-progress`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   })
@@ -282,7 +316,7 @@ async function getDemoJobs(startShift: ShiftCode): Promise<CreateJobPayload[]> {
     schonGeheftet: row.schonGeheftet ?? false,
     isPriority: row.isPriority ?? false,
     isForced: false,
-    isHeld: false,
+    isHeld: true,
     status: 'open',
     shift: startShift,
     date: demoDate,
@@ -299,11 +333,31 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   })
 
   if (!response.ok) {
-    const message = await response.text()
+    const message = await getApiErrorMessage(response)
     throw new Error(message || `Request failed with status ${response.status}`)
   }
 
   return response.json() as Promise<T>
+}
+
+async function getApiErrorMessage(response: Response) {
+  const text = await response.text()
+
+  if (!text) {
+    return ''
+  }
+
+  try {
+    const body = JSON.parse(text) as { error?: string; message?: string | string[]; statusCode?: number }
+
+    if (Array.isArray(body.message)) {
+      return body.message.join(' ')
+    }
+
+    return body.message || body.error || text
+  } catch {
+    return text
+  }
 }
 
 const demoDate = '2026-06-08'
@@ -312,4 +366,18 @@ const demoCapacities: CapacityDraft[] = [
   { shift: 'N', schlosserCount: 1, vorrichtungCount: 3, targetRobotPercent: 100 },
   { shift: 'F', schlosserCount: 2, vorrichtungCount: 3, targetRobotPercent: 100 },
   { shift: 'S', schlosserCount: 3, vorrichtungCount: 3, targetRobotPercent: 100 },
+]
+
+const knownRobots: Array<Omit<Robot, 'id' | 'isActive'>> = [
+  { assetId: 'AP2345', location: 'Halle 1', name: 'Freya', process: 'Laser welding' },
+  { assetId: 'AP2418', location: 'Halle 1', name: 'Donna', process: 'Laser welding' },
+  { assetId: 'AP2670', location: 'Halle 2', name: 'Jana', process: 'Laser welding' },
+  { assetId: 'AP2904', location: 'Halle 2', name: 'Pesa', process: 'Laser welding' },
+  { assetId: 'AP3159', location: 'Halle 3', name: 'Kabine B', process: 'Laser welding' },
+  { assetId: 'AP3286', location: 'Halle 2', name: 'Kabine C', process: 'Laser welding' },
+  { assetId: 'AP3374', location: 'Halle 3', name: 'Kabine D', process: 'Laser welding' },
+  { assetId: 'AP3421', location: 'Halle 3', name: 'Kabine V', process: 'Laser welding' },
+  { assetId: 'AP3562', location: 'Halle 1', name: 'Gina', process: 'Laser welding' },
+  { assetId: 'AP3617', location: 'Halle 2', name: 'Emma', process: 'Laser welding' },
+  { assetId: 'AP3740', location: 'Halle 2', name: 'Kabine A', process: 'Laser welding' },
 ]

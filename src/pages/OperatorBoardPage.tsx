@@ -1,27 +1,30 @@
 import {
-  AlertTriangle,
   ArrowLeft,
+  AlertTriangle,
   CheckCircle2,
   ClipboardCheck,
   Clock3,
   Factory,
-  LayoutGrid,
-  ListPlus,
-  MessageSquareText,
+  Loader2,
+  Plus,
+  RefreshCw,
   Save,
-  Table2,
+  ShieldCheck,
+  Wrench,
+  X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import {
-  delayReasons,
-  robots,
-  shiftDelays,
-  todayPlan,
-  type JobProgressState,
-  type ProductionJob,
+  createJob,
+  getJobs,
+  getRobots,
+  updateJobSuProgress,
+  updateJob,
+  type Job,
+  type Robot,
   type ShiftCode,
-} from '../data/demoData'
+} from '../api/plannerApi'
 import {
   cardClassName,
   inputClassName,
@@ -29,177 +32,289 @@ import {
   primaryButtonClassName,
   secondaryButtonClassName,
 } from '../styles/ui'
-import type { PlanningRequestType } from '../requests/requestContext'
-import { usePlanningRequests } from '../requests/usePlanningRequests'
 import { useCurrentUser } from '../users/useCurrentUser'
 
-type JobEntry = {
-  doneQty: number
-  progress: JobProgressState
-  comment: string
-  reason: string
-  touched: boolean
-  weldedReady: boolean
+type OperatorNotice = {
+  text: string
+  tone: 'error' | 'info' | 'success'
 }
 
-type ExtraBauteilRequest = {
-  id: string
+type RepairDraft = {
   faNumber: string
-  project: string
-  articleNo: string
-  step: string
-  fixture: string
-  qty: string
-  requestType: PlanningRequestType
-  reason: string
+  projekt: string
+  artikelNummer: string
+  jobType: Job['jobType']
+  schritt: string
+  shift: ShiftCode
+  vorrichtung: string
+  anlageMinutes: string
+  schlosserMinutes: string
+  schonGeheftet: boolean
   comment: string
 }
 
-type BoardView = 'cards' | 'table'
+const plannerDate = '2026-06-08'
 
-const progressOptions: { label: string; value: JobProgressState }[] = [
-  { label: 'Fertig', value: 'done' },
-  { label: 'Teilweise', value: 'partial' },
-  { label: 'Nicht fertig', value: 'not_done' },
-  { label: 'SU', value: 'su' },
+const shifts: { label: string; name: string; time: string; value: ShiftCode }[] = [
+  { label: 'N', name: 'Nacht', time: '22:00 - 06:00', value: 'N' },
+  { label: 'F', name: 'Frueh', time: '06:00 - 14:00', value: 'F' },
+  { label: 'S', name: 'Spaet', time: '14:00 - 22:00', value: 'S' },
 ]
 
-const emptyExtraRequest: Omit<ExtraBauteilRequest, 'id'> = {
+const emptyRepairDraft: RepairDraft = {
   faNumber: '',
-  project: '',
-  articleNo: '',
-  step: '',
-  fixture: '',
-  qty: '1',
-  requestType: 'unplanned',
-  reason: 'Material fehlt',
+  projekt: '',
+  artikelNummer: '',
+  jobType: 'production',
+  schritt: '1',
+  shift: 'F',
+  vorrichtung: '1',
+  anlageMinutes: '45',
+  schlosserMinutes: '60',
+  schonGeheftet: false,
   comment: '',
 }
 
 export function OperatorBoardPage() {
   const { robotId } = useParams()
   const { currentUser } = useCurrentUser()
-  const { addRequest, requests } = usePlanningRequests()
+  const [robots, setRobots] = useState<Robot[]>([])
+  const [selectedRobotId, setSelectedRobotId] = useState('')
   const [selectedShiftCode, setSelectedShiftCode] = useState<ShiftCode>(currentUser.shift ?? 'F')
-  const selectedRobot = robots.find((robot) => robot.id === robotId)
-  const activeShift = todayPlan.find((shift) => shift.robotId === robotId && shift.shift === selectedShiftCode)
-  const existingDelays = shiftDelays.filter((delay) => delay.robotId === robotId && delay.shift === selectedShiftCode)
-  const [boardView, setBoardView] = useState<BoardView>('cards')
-  const [delayMinutes, setDelayMinutes] = useState('30')
-  const [delayReason, setDelayReason] = useState(delayReasons[0])
-  const [shiftComment, setShiftComment] = useState('')
-  const [savedMessage, setSavedMessage] = useState('')
-  const [showEndShiftSummary, setShowEndShiftSummary] = useState(false)
-  const [handoverConfirmed, setHandoverConfirmed] = useState(false)
-  const [extraDraft, setExtraDraft] = useState(emptyExtraRequest)
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isWorking, setIsWorking] = useState(false)
+  const [notice, setNotice] = useState<OperatorNotice | null>(null)
+  const [suJob, setSuJob] = useState<Job | null>(null)
+  const [suPercent, setSuPercent] = useState('50')
+  const [isRepairPanelOpen, setIsRepairPanelOpen] = useState(false)
+  const [repairDraft, setRepairDraft] = useState<RepairDraft>(emptyRepairDraft)
+  const [duplicateJob, setDuplicateJob] = useState<Job | null>(null)
 
-  const initialEntries = useMemo(() => {
-    const entries: Record<string, JobEntry> = {}
+  const selectedRobot = robots.find((robot) => robot.id === selectedRobotId)
 
-    activeShift?.jobs.forEach((job) => {
-      entries[job.id] = {
-        doneQty: job.doneQty,
-        progress: getInitialProgress(job),
-        comment: job.operatorNote ?? '',
-        reason: job.delayReason ?? '',
-        touched: job.doneQty >= job.plannedQty,
-        weldedReady: job.schlosserMin === 0 || job.doneQty >= job.plannedQty,
-      }
-    })
-
-    return entries
-  }, [activeShift])
-
-  const [jobEntryState, setJobEntryState] = useState<{ entries: Record<string, JobEntry>; shiftId: string }>({
-    entries: initialEntries,
-    shiftId: activeShift?.id ?? '',
-  })
-  const jobEntries = jobEntryState.shiftId === activeShift?.id ? jobEntryState.entries : initialEntries
-
-  if (!selectedRobot) {
-    return <Navigate to="/robots" replace />
+  const showNotice = (text: string, tone: OperatorNotice['tone'] = 'info') => {
+    setNotice({ text, tone })
+    window.setTimeout(() => {
+      setNotice((current) => (current?.text === text ? null : current))
+    }, 5600)
   }
 
-  if (!activeShift) {
-    return (
-      <NoShiftPlan
-        selectedRobot={selectedRobot}
-        selectedShiftCode={selectedShiftCode}
-        setSelectedShiftCode={setSelectedShiftCode}
-        shift={selectedShiftCode}
-        userName={currentUser.name}
-        canSelectShift={!currentUser.shift}
-      />
+  const loadBoard = useCallback(async () => {
+    setIsLoading(true)
+
+    try {
+      const robotList = await getRobots()
+      const nextRobot = findRobotFromRoute(robotList, robotId)
+
+      setRobots(robotList)
+      setSelectedRobotId(nextRobot?.id ?? '')
+
+      if (!nextRobot) {
+        setJobs([])
+        return
+      }
+
+      const nextJobs = await getJobs({ robotId: nextRobot.id, date: plannerDate })
+      setJobs(sortOperatorJobs(nextJobs))
+    } catch (error) {
+      showNotice(getErrorMessage(error), 'error')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [robotId])
+
+  useEffect(() => {
+    void loadBoard()
+  }, [loadBoard])
+
+  const dayJobs = useMemo(() => jobs.filter((job) => job.date === plannerDate), [jobs])
+  const doneJobs = dayJobs.filter((job) => job.status === 'done')
+  const openDayJobs = dayJobs.filter((job) => job.status !== 'done')
+  const readyJobs = openDayJobs.filter((job) => job.schonGeheftet || job.jobType === 'repair')
+  const waitingForHeften = openDayJobs.filter((job) => !job.schonGeheftet && job.jobType === 'production')
+  const repairJobs = dayJobs.filter((job) => job.jobType === 'repair')
+  const robotMinutesOpen = openDayJobs.reduce((total, job) => total + (job.remainingAnlageMinutes ?? job.anlageMinutes), 0)
+
+  const patchJob = async (job: Job, patch: Partial<Job>, successMessage: string) => {
+    setIsWorking(true)
+    setNotice(null)
+
+    try {
+      await updateJob(job.id, patch)
+      showNotice(successMessage, 'success')
+      await loadBoard()
+    } catch (error) {
+      showNotice(getErrorMessage(error), 'error')
+    } finally {
+      setIsWorking(false)
+    }
+  }
+
+  const markGeheftet = (job: Job) => {
+    void patchJob(job, { schlosserMinutes: 0, schonGeheftet: true }, `${job.faNumber} ist als schon geheftet markiert.`)
+  }
+
+  const markDone = (job: Job) => {
+    void patchJob(job, { status: 'done' }, `${job.faNumber} wurde fertig gemeldet.`)
+  }
+
+  const markNotDone = (job: Job) => {
+    const nextShift = getNextShift(job.shift)
+
+    void patchJob(
+      job,
+      {
+        date: getNextShiftDate(job.date, job.shift),
+        isForced: true,
+        isHeld: false,
+        isPriority: true,
+        shift: nextShift,
+        status: 'open',
+      },
+      `${job.faNumber} wurde als nicht fertig markiert und nach ${getShiftName(nextShift)} als Prioritaet uebertragen.`,
     )
   }
 
-  const activeJobs = activeShift.jobs.filter((job) => !isHandled(jobEntries[job.id]))
-  const handledJobs = activeShift.jobs.filter((job) => isHandled(jobEntries[job.id]))
-  const doneCount = activeShift.jobs.filter((job) => jobEntries[job.id]?.progress === 'done').length
-  const remainingRobotMinutes = activeShift.jobs.reduce((sum, job) => sum + getRemainingRobotMinutes(job, jobEntries[job.id]), 0)
-  const remainingSchlosserMinutes = activeShift.jobs.reduce((sum, job) => sum + getRemainingSchlosserMinutes(job, jobEntries[job.id]), 0)
-  const extraRequests = requests.filter(
-    (request) => request.anlageId === selectedRobot.id && request.shift === activeShift.shift && request.operator === currentUser.name,
-  )
-  const plannedMatch = findPlannedMatch(extraDraft, selectedRobot.id, activeShift.id)
-  const suggestedRequestType = getSuggestedRequestType(extraDraft.reason, plannedMatch?.shift.shift)
+  const saveSu = async () => {
+    if (!suJob) return
 
-  const updateEntry = (jobId: string, nextEntry: Partial<JobEntry>) => {
-    setJobEntryState((current) => ({
-      entries: {
-        ...(current.shiftId === activeShift.id ? current.entries : initialEntries),
-        [jobId]: {
-          ...(current.shiftId === activeShift.id ? current.entries[jobId] : initialEntries[jobId]),
-          ...nextEntry,
-          touched: true,
-        },
-      },
-      shiftId: activeShift.id,
-    }))
-    setSavedMessage('')
+    const percentDone = clampNumber(Number(suPercent), 0, 100)
+    setIsWorking(true)
+    setNotice(null)
+
+    try {
+      await updateJobSuProgress(suJob.id, {
+        progressPercent: percentDone,
+        nextShift: getNextShift(suJob.shift),
+      })
+      if (percentDone < 100) {
+        await updateJob(suJob.id, {
+          date: getNextShiftDate(suJob.date, suJob.shift),
+          isForced: true,
+          isHeld: false,
+          isPriority: true,
+        })
+      }
+      showNotice(
+        percentDone === 100
+          ? `${suJob.faNumber} wurde mit 100% SU als fertig gespeichert.`
+          : `${suJob.faNumber} wurde mit ${percentDone}% SU gespeichert und bleibt als Prioritaet fuer die naechste Schicht sichtbar.`,
+        'success',
+      )
+      setSuJob(null)
+      setSuPercent('50')
+      await loadBoard()
+    } catch (error) {
+      showNotice(getErrorMessage(error), 'error')
+    } finally {
+      setIsWorking(false)
+    }
   }
 
-  const setProgress = (job: ProductionJob, progress: JobProgressState) => {
-    updateEntry(job.id, {
-      progress,
-      doneQty: progress === 'done' ? job.plannedQty : jobEntries[job.id].doneQty,
-      weldedReady: progress === 'done' ? true : jobEntries[job.id].weldedReady,
-    })
-  }
-
-  const nextShiftLabel = getNextShiftLabel(activeShift.shift)
-
-  const addExtraRequest = () => {
-    if (!extraDraft.faNumber.trim() || !extraDraft.project.trim() || !extraDraft.articleNo.trim()) {
-      setSavedMessage('FA Nummer, Projekt und Art. Nr. sind Pflichtfelder, bevor die Anfrage an die Planung geht.')
+  const createOperatorJob = async () => {
+    if (!selectedRobot || !repairDraft.faNumber.trim() || !repairDraft.projekt.trim() || !repairDraft.artikelNummer.trim()) {
+      showNotice('FA Nummer, Projekt und Art. Nr. sind Pflichtfelder.', 'error')
       return
     }
 
-    addRequest({
-      anlageId: selectedRobot.id,
-      articleNo: extraDraft.articleNo.trim(),
-      comment: extraDraft.comment.trim(),
-      faNumber: extraDraft.faNumber.trim(),
-      fixture: extraDraft.fixture.trim() || 'Noch offen',
-      matchedJobId: plannedMatch?.job.id,
-      operator: currentUser.name,
-      plannedDate: plannedMatch?.shift.date,
-      plannedShift: plannedMatch?.shift.shift,
-      plannedShiftName: plannedMatch?.shift.shiftName,
-      project: extraDraft.project.trim(),
-      qty: Number(extraDraft.qty) || 1,
-      requestType: extraDraft.requestType,
-      reason: extraDraft.reason,
-      shift: activeShift.shift,
-      step: extraDraft.step.trim() || 'Noch offen',
-    })
-    setExtraDraft(emptyExtraRequest)
-    setSavedMessage(`${getRequestTypeLabel(extraDraft.requestType)} erstellt. Freigabe durch die Planung erforderlich.`)
+    setIsWorking(true)
+    setNotice(null)
+
+    try {
+      if (repairDraft.jobType === 'production') {
+        const robotJobs = await getJobs({ robotId: selectedRobot.id })
+        const existingProductionJob = findExistingProductionJob(robotJobs, repairDraft)
+
+        if (existingProductionJob) {
+          setDuplicateJob(existingProductionJob)
+          showNotice(`${existingProductionJob.faNumber} Schritt ${existingProductionJob.schritt} ist bereits geplant.`, 'info')
+          return
+        }
+      }
+
+      await createJob({
+        faNumber: repairDraft.faNumber.trim(),
+        projekt: repairDraft.projekt.trim(),
+        artikelNummer: repairDraft.artikelNummer.trim(),
+        schritt: toNumber(repairDraft.schritt, 1),
+        vorrichtung: toNumber(repairDraft.vorrichtung, 1),
+        menge: 1,
+        robotId: selectedRobot.id,
+        anlageMinutes: toNumber(repairDraft.anlageMinutes, 0),
+        schlosserMinutes: repairDraft.schonGeheftet ? 0 : toNumber(repairDraft.schlosserMinutes, 0),
+        ruestMinutes: 0,
+        jobType: repairDraft.jobType,
+        schonGeheftet: repairDraft.schonGeheftet,
+        isPriority: true,
+        isForced: true,
+        isHeld: true,
+        approvalStatus: 'pending',
+        createdByName: currentUser.name,
+        createdByRole: currentUser.role,
+        status: 'open',
+        date: plannerDate,
+        shift: repairDraft.shift,
+      })
+      setDuplicateJob(null)
+      setRepairDraft({ ...emptyRepairDraft, shift: selectedShiftCode })
+      setIsRepairPanelOpen(false)
+      showNotice('Job wurde angelegt und wartet auf Freigabe durch den Supervisor.', 'success')
+      await loadBoard()
+    } catch (error) {
+      showNotice(getErrorMessage(error), 'error')
+    } finally {
+      setIsWorking(false)
+    }
+  }
+
+  const moveExistingJobToRequestedShift = async () => {
+    if (!duplicateJob || !selectedRobot) return
+
+    setIsWorking(true)
+    setNotice(null)
+
+    try {
+      await updateJob(duplicateJob.id, {
+        date: plannerDate,
+        shift: repairDraft.shift,
+        isForced: true,
+        isHeld: true,
+        isPriority: true,
+        approvalStatus: 'pending',
+        createdByName: currentUser.name,
+        createdByRole: currentUser.role,
+        schonGeheftet: repairDraft.schonGeheftet || duplicateJob.schonGeheftet,
+        schlosserMinutes: repairDraft.schonGeheftet ? 0 : duplicateJob.schlosserMinutes,
+      })
+      setDuplicateJob(null)
+      setRepairDraft({ ...emptyRepairDraft, shift: selectedShiftCode })
+      setIsRepairPanelOpen(false)
+      showNotice(`${duplicateJob.faNumber} wurde in ${getShiftName(repairDraft.shift)} gezogen und wartet auf Supervisor-Freigabe.`, 'success')
+      await loadBoard()
+    } catch (error) {
+      showNotice(getErrorMessage(error), 'error')
+    } finally {
+      setIsWorking(false)
+    }
+  }
+
+  const createDuplicateAsRepair = () => {
+    setDuplicateJob(null)
+    setRepairDraft((current) => ({
+      ...current,
+      jobType: 'repair',
+    }))
+    showNotice('Typ wurde auf Reparatur gesetzt. Jetzt kann der Job als Nacharbeit gespeichert werden.', 'info')
+  }
+
+  if (!isLoading && !selectedRobot) {
+    return <Navigate to="/robots" replace />
   }
 
   return (
-    <main className={pageShellClassName}>
-      <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur">
+    <main className={`${pageShellClassName} bg-[radial-gradient(circle_at_top_left,#dbeafe_0,#f7f9fc_34rem)]`}>
+      <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-3 lg:flex-row lg:items-center lg:justify-between lg:px-6">
           <div>
             <Link to="/robots" className="mb-2 inline-flex items-center gap-2 text-sm font-black text-blue-700">
@@ -207,10 +322,10 @@ export function OperatorBoardPage() {
               Anlagen-Auswahl
             </Link>
             <h1 className="text-2xl font-black tracking-normal text-slate-950">
-              Bediener-Board: {selectedRobot.name}
+              Bediener-Board{selectedRobot ? `: ${selectedRobot.name}` : ''}
             </h1>
             <p className="mt-1 text-sm font-bold text-slate-500">
-              {selectedRobot.assetId} / {activeShift.shiftName} / {activeShift.time} / {currentUser.name}
+              {selectedRobot ? `${selectedRobot.assetId} / ${selectedRobot.location}` : 'Backend-Daten werden geladen'} / {currentUser.name}
             </p>
           </div>
 
@@ -223,1023 +338,646 @@ export function OperatorBoardPage() {
                   value={selectedShiftCode}
                   onChange={(event) => setSelectedShiftCode(event.target.value as ShiftCode)}
                 >
-                  <option value="F">F / Frueh</option>
-                  <option value="S">S / Spaet</option>
-                  <option value="N">N / Nacht</option>
+                  {shifts.map((shift) => (
+                    <option key={shift.value} value={shift.value}>
+                      {shift.label} / {shift.name}
+                    </option>
+                  ))}
                 </select>
               </label>
             )}
-            <Link className={secondaryButtonClassName} to={`/robots/${selectedRobot.id}/day`}>
-              Tagesplan Live
+            <button className={secondaryButtonClassName} type="button" onClick={() => void loadBoard()} disabled={isWorking}>
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              Aktualisieren
+            </button>
+            <Link className={secondaryButtonClassName} to={selectedRobot ? `/robots/${selectedRobot.id}/day` : '/robots'}>
+              Tagesplan
             </Link>
-            <button
-              className={secondaryButtonClassName}
-              type="button"
-              onClick={() => setShowEndShiftSummary((current) => !current)}
-            >
-              <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
-              Schicht beenden
-            </button>
-            <button
-              className={primaryButtonClassName}
-              type="button"
-              onClick={() => setSavedMessage('Demo gespeichert. Aktive Liste, erledigte Positionen, SU und Anfragen sind fuer die Uebergabe bereit.')}
-            >
-              <Save className="h-4 w-4" aria-hidden="true" />
-              Schicht speichern
-            </button>
           </div>
         </div>
       </header>
 
       <section className="mx-auto max-w-7xl px-5 py-6 lg:px-6">
-        <div className="grid gap-4 md:grid-cols-4">
-          <Metric icon={<Factory className="h-5 w-5" />} label="Anlage" value={selectedRobot.name} />
-          <Metric icon={<CheckCircle2 className="h-5 w-5" />} label="Fertig" value={`${doneCount}/${activeShift.jobs.length}`} />
-          <Metric icon={<Clock3 className="h-5 w-5" />} label="Rest Roboter" value={`${remainingRobotMinutes}m`} />
-          <Metric icon={<AlertTriangle className="h-5 w-5" />} label="Rest Schlosser" value={`${remainingSchlosserMinutes}m`} />
-        </div>
-
-        {savedMessage && (
-          <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700">
-            {savedMessage}
+        {isLoading ? (
+          <div className={`${cardClassName} flex items-center gap-3 p-6 text-sm font-bold text-slate-500`}>
+            <Loader2 className="h-5 w-5 animate-spin text-blue-700" aria-hidden="true" />
+            Lade Bediener-Board...
           </div>
-        )}
-
-        {showEndShiftSummary && (
-          <EndShiftSummary
-            currentShift={activeShift.shiftName}
-            existingDelayCount={existingDelays.length}
-            extraRequests={extraRequests}
-            handoverConfirmed={handoverConfirmed}
-            jobEntries={jobEntries}
-            jobs={activeShift.jobs}
-            nextShiftLabel={nextShiftLabel}
-            shiftComment={shiftComment}
-            onConfirm={() => {
-              setHandoverConfirmed(true)
-              setSavedMessage(`Schicht abgeschlossen. Uebergabe fuer ${nextShiftLabel} vorbereitet.`)
-            }}
-          />
-        )}
-
-        <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <section className="space-y-5">
-            <div className={`${cardClassName} p-5`}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <p className="text-sm font-bold uppercase tracking-[0.14em] text-blue-700">
-                    Aktuelle Schichtliste
-                  </p>
-                  <h2 className="mt-1 text-xl font-black text-slate-950">
-                    Positionen bearbeiten
-                  </h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">
-                    Positionen mit Fertig, Nicht fertig oder SU wandern in die erledigte Liste, damit die offene Liste kurz bleibt.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
-                  <button
-                    className={`inline-flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-black ${
-                      boardView === 'cards' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'
-                    }`}
-                    type="button"
-                    onClick={() => setBoardView('cards')}
-                  >
-                    <LayoutGrid className="h-4 w-4" aria-hidden="true" />
-                    Karten
-                  </button>
-                  <button
-                    className={`inline-flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-black ${
-                      boardView === 'table' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'
-                    }`}
-                    type="button"
-                    onClick={() => setBoardView('table')}
-                  >
-                    <Table2 className="h-4 w-4" aria-hidden="true" />
-                    Tabelle
-                  </button>
-                </div>
-              </div>
+        ) : (
+          <>
+            <div className="grid gap-4 md:grid-cols-4">
+              <Metric icon={<Factory className="h-5 w-5" />} label="Anlage" value={selectedRobot?.name ?? 'Keine'} />
+              <Metric icon={<CheckCircle2 className="h-5 w-5" />} label="Fertig heute" value={`${doneJobs.length}/${dayJobs.length}`} />
+              <Metric icon={<ShieldCheck className="h-5 w-5" />} label="Bereit" value={`${readyJobs.length}`} />
+              <Metric icon={<Clock3 className="h-5 w-5" />} label="Roboter offen" value={`${robotMinutesOpen}m`} />
             </div>
 
-            {boardView === 'cards' ? (
-              <div className="grid gap-4 lg:grid-cols-2">
-                {activeJobs.map((job) => (
-                  <BauteilCard
-                    entry={jobEntries[job.id]}
-                    job={job}
-                    key={job.id}
-                    onProgress={setProgress}
-                    onUpdate={updateEntry}
-                  />
-                ))}
-                {activeJobs.length === 0 && (
-                  <div className={`${cardClassName} p-6 lg:col-span-2`}>
-                    <p className="text-sm font-black text-emerald-700">Offene Liste ist fuer diese Schicht leer.</p>
+            <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <section className="min-w-0 space-y-5">
+                <section className="overflow-hidden rounded-3xl border border-white/80 bg-white/90 shadow-2xl shadow-slate-200/70 backdrop-blur">
+                  <div className="border-b border-slate-100 p-5">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-bold uppercase tracking-[0.14em] text-blue-700">Tagesaufgaben</p>
+                        <h2 className="mt-1 text-xl font-black text-slate-950">Alle Schichten / {plannerDate}</h2>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">Bediener koennen auch spaetere Schichten als schon geheftet melden. Danach wird der Tagesplan neu verteilt.</p>
+                      </div>
+                      <button
+                        className={secondaryButtonClassName}
+                        type="button"
+                        onClick={() => {
+                          setRepairDraft((current) => ({ ...current, shift: selectedShiftCode }))
+                          setIsRepairPanelOpen((current) => !current)
+                        }}
+                      >
+                        <Wrench className="h-4 w-4" aria-hidden="true" />
+                        Job melden
+                      </button>
+                    </div>
                   </div>
-                )}
-              </div>
-            ) : (
-              <EditableJobTable jobs={activeShift.jobs} jobEntries={jobEntries} onProgress={setProgress} onUpdate={updateEntry} />
-            )}
 
-            <HandledJobs jobs={handledJobs} jobEntries={jobEntries} />
-          </section>
-
-          <aside className="min-w-0 space-y-5">
-            <section className={`${cardClassName} min-w-0 p-5`}>
-              <div className="flex items-center gap-2">
-                <ListPlus className="h-5 w-5 text-blue-700" aria-hidden="true" />
-                <h2 className="text-lg font-black text-slate-950">Ungeplante Position melden</h2>
-              </div>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                Nutzen, wenn Material fehlt und eine andere Position gefertigt wird, oder wenn ein bereits geheftetes Teil mit derselben FA Nummer nachgearbeitet werden muss.
-              </p>
-
-              <div className="mt-4 grid gap-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <TextField label="FA Nummer" value={extraDraft.faNumber} onChange={(value) => setExtraDraft((current) => ({ ...current, faNumber: value }))} />
-                  <TextField label="Menge" type="number" value={extraDraft.qty} onChange={(value) => setExtraDraft((current) => ({ ...current, qty: value }))} />
-                </div>
-                {plannedMatch && (
-                  <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-900">
-                    <p className="font-black">FA Nummer ist schon im Plan.</p>
-                    <p className="mt-1">
-                      Geplant: {plannedMatch.shift.shiftName} / {plannedMatch.shift.date} / {plannedMatch.job.project} / Art. {plannedMatch.job.articleNo} / {plannedMatch.job.step}
-                    </p>
-                  </div>
-                )}
-                {!plannedMatch && extraDraft.faNumber.trim() && (
-                  <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-sm font-bold text-amber-900">
-                    Keine geplante Position mit dieser FA Nummer gefunden. Diese Anfrage bleibt ungeplant oder Nacharbeit.
-                  </div>
-                )}
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Anfrageart
-                  <select
-                    className={inputClassName}
-                    value={extraDraft.requestType}
-                    onChange={(event) => setExtraDraft((current) => ({ ...current, requestType: event.target.value as PlanningRequestType }))}
-                  >
-                    <option value="unplanned">Ungeplant / Ersatzteil</option>
-                    <option value="pull_forward">Vorziehen aus anderer Schicht</option>
-                    <option value="repair">Nacharbeit / Reparatur</option>
-                  </select>
-                </label>
-                {suggestedRequestType !== extraDraft.requestType && (
-                  <button
-                    className="h-10 rounded-xl bg-slate-100 px-3 text-xs font-black text-slate-700 transition hover:bg-slate-200"
-                    type="button"
-                    onClick={() => setExtraDraft((current) => ({ ...current, requestType: suggestedRequestType }))}
-                  >
-                    Vorschlag uebernehmen: {getRequestTypeLabel(suggestedRequestType)}
-                  </button>
-                )}
-                <TextField label="Projekt" value={extraDraft.project} onChange={(value) => setExtraDraft((current) => ({ ...current, project: value }))} />
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <TextField label="Art. Nr." value={extraDraft.articleNo} onChange={(value) => setExtraDraft((current) => ({ ...current, articleNo: value }))} />
-                  <TextField label="Schritt" value={extraDraft.step} onChange={(value) => setExtraDraft((current) => ({ ...current, step: value }))} />
-                </div>
-                <TextField label="Vorrichtung" value={extraDraft.fixture} onChange={(value) => setExtraDraft((current) => ({ ...current, fixture: value }))} />
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Grund
-                  <select
-                    className={inputClassName}
-                    value={extraDraft.reason}
-                    onChange={(event) => setExtraDraft((current) => ({ ...current, reason: event.target.value }))}
-                  >
-                    {delayReasons.map((reason) => (
-                      <option value={reason} key={reason}>
-                        {reason}
-                      </option>
+                  <div className="divide-y divide-slate-100">
+                    {shifts.map((shift) => (
+                      <ShiftQueueSection
+                        currentShiftCode={selectedShiftCode}
+                        isWorking={isWorking}
+                        jobs={dayJobs.filter((job) => job.shift === shift.value && job.status !== 'done')}
+                        key={shift.value}
+                        onDone={markDone}
+                        onGeheftet={markGeheftet}
+                        onNotDone={markNotDone}
+                        onSu={(nextSuJob) => {
+                          setSuJob(nextSuJob)
+                          setSuPercent(String(nextSuJob.progressPercent ?? 50))
+                        }}
+                        shift={shift}
+                      />
                     ))}
-                  </select>
-                </label>
-                <TextField
-                  label="Kommentar"
-                  placeholder="z.B. Naht 10 bis 14 reparieren, oder warum die Position dazu kam"
-                  value={extraDraft.comment}
-                  onChange={(value) => setExtraDraft((current) => ({ ...current, comment: value }))}
-                />
-                <button className={`${secondaryButtonClassName} w-full px-3 text-xs sm:text-sm`} type="button" onClick={addExtraRequest}>
-                  <span className="truncate">Zur Freigabe senden</span>
-                </button>
-              </div>
+                    {openDayJobs.length === 0 && (
+                      <p className="p-5 text-sm font-bold text-emerald-700">Keine offenen Jobs fuer diesen Tag.</p>
+                    )}
+                  </div>
+                </section>
 
-              {extraRequests.length > 0 && (
-                <div className="mt-5 space-y-3">
-                  {extraRequests.map((request) => (
-                    <article className={`rounded-xl p-3 text-sm ${getRequestStatusClassName(request.status)}`} key={request.id}>
-                      <p className="font-black">
-                        {getRequestStatusLabel(request.status)} / {getRequestTypeLabel(request.requestType)} / {request.faNumber}
-                      </p>
-                      <p className="mt-1">
-                        {request.project || 'Kein Projekt'} / Art. {request.articleNo} / Menge {request.qty}
-                      </p>
-                      {request.requestType === 'pull_forward' && request.plannedShiftName && (
-                        <p className="mt-1 font-bold">
-                          Vorgezogen aus {request.plannedShiftName} / {request.plannedDate}
-                        </p>
-                      )}
-                      {request.supervisorNote && (
-                        <p className="mt-1 font-bold">
-                          Planung: {request.supervisorNote}
-                        </p>
-                      )}
-                    </article>
-                  ))}
-                </div>
-              )}
-            </section>
+                {doneJobs.length > 0 && (
+                  <section className={`${cardClassName} overflow-hidden`}>
+                    <div className="border-b border-slate-100 p-5">
+                      <p className="text-sm font-bold uppercase tracking-[0.14em] text-emerald-700">Erledigt</p>
+                      <h2 className="mt-1 text-xl font-black text-slate-950">Fertig gemeldete Jobs</h2>
+                    </div>
+                    <div className="grid gap-3 p-3 md:grid-cols-2">
+                      {doneJobs.map((job) => (
+                        <JobMiniCard key={job.id} job={job} />
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </section>
 
-            <ShiftDelayPanel
-              delayMinutes={delayMinutes}
-              delayReason={delayReason}
-              existingDelays={existingDelays}
-              shiftComment={shiftComment}
-              onDelayMinutesChange={setDelayMinutes}
-              onDelayReasonChange={setDelayReason}
-              onShiftCommentChange={setShiftComment}
-              onAddDelay={() => setSavedMessage(`${delayMinutes} min Stoerung hinzugefuegt: ${delayReason}`)}
-            />
-          </aside>
-        </div>
+              <aside className="space-y-5">
+                <section className={`${cardClassName} p-5`}>
+                  <p className="text-sm font-bold uppercase tracking-[0.14em] text-blue-700">Status</p>
+                  <h2 className="mt-1 text-xl font-black text-slate-950">Was steht an?</h2>
+                  <div className="mt-4 space-y-3">
+                    <SideStat label="Wartet auf Heften" value={waitingForHeften.length} tone="amber" />
+                    <SideStat label="Reparaturen" value={repairJobs.length} tone="rose" />
+                    <SideStat label="SU / Rest" value={openDayJobs.filter((job) => job.progressPercent && job.progressPercent > 0 && job.progressPercent < 100).length} tone="blue" />
+                  </div>
+                </section>
+
+                {isRepairPanelOpen && (
+                  <RepairPanel
+                    duplicateJob={duplicateJob}
+                    draft={repairDraft}
+                    isWorking={isWorking}
+                    onChange={(patch) => {
+                      setDuplicateJob(null)
+                      setRepairDraft((current) => ({ ...current, ...patch }))
+                    }}
+                    onCreate={() => void createOperatorJob()}
+                    onCreateRepair={createDuplicateAsRepair}
+                    onMoveExisting={() => void moveExistingJobToRequestedShift()}
+                  />
+                )}
+
+                <section className={`${cardClassName} p-5`}>
+                  <div className="flex items-center gap-2">
+                    <ClipboardCheck className="h-5 w-5 text-blue-700" aria-hidden="true" />
+                    <h2 className="text-lg font-black text-slate-950">Schichtuebergabe</h2>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    SU-Jobs mit Prozent speichern. Jeder offene Job kann einzeln in die naechste Schicht uebertragen werden.
+                  </p>
+                  <button className={`${primaryButtonClassName} mt-4 w-full`} type="button" onClick={() => showNotice('Uebergabe gespeichert. Offene/SU Jobs bleiben fuer die naechste Planung sichtbar.', 'success')}>
+                    <Save className="h-4 w-4" aria-hidden="true" />
+                    Uebergabe speichern
+                  </button>
+                </section>
+              </aside>
+            </div>
+          </>
+        )}
       </section>
+
+      {suJob && (
+        <SuDialog
+          isWorking={isWorking}
+          job={suJob}
+          percent={suPercent}
+          onCancel={() => setSuJob(null)}
+          onChange={setSuPercent}
+          onSave={() => void saveSu()}
+        />
+      )}
+      {notice && <Toast notice={notice} onClose={() => setNotice(null)} />}
     </main>
   )
 }
 
-function getRequestStatusLabel(status: 'approved' | 'pending' | 'rejected') {
-  if (status === 'approved') {
-    return 'Freigegeben'
-  }
-
-  if (status === 'rejected') {
-    return 'Abgelehnt'
-  }
-
-  return 'Wartet auf Freigabe'
-}
-
-function getRequestTypeLabel(requestType: PlanningRequestType) {
-  if (requestType === 'pull_forward') {
-    return 'Vorziehen'
-  }
-
-  if (requestType === 'repair') {
-    return 'Nacharbeit'
-  }
-
-  return 'Ungeplant'
-}
-
-function getSuggestedRequestType(reason: string, plannedShift?: ShiftCode): PlanningRequestType {
-  const repairReason = reason.toLowerCase().includes('repar') || reason.toLowerCase().includes('nacharbeit')
-
-  if (repairReason) {
-    return 'repair'
-  }
-
-  if (plannedShift) {
-    return 'pull_forward'
-  }
-
-  return 'unplanned'
-}
-
-function findPlannedMatch(
-  draft: Omit<ExtraBauteilRequest, 'id'>,
-  robotId: string,
-  activeShiftId: string,
-) {
-  const faNumber = draft.faNumber.trim().toLowerCase()
-
-  if (!faNumber) {
-    return null
-  }
-
-  const matches = todayPlan
-    .filter((shift) => shift.robotId === robotId && shift.id !== activeShiftId)
-    .flatMap((shift) => shift.jobs.map((job) => ({ job, shift })))
-    .filter(({ job }) => job.faNumber.toLowerCase() === faNumber)
-
-  if (matches.length === 0) {
-    return null
-  }
-
-  const articleNo = draft.articleNo.trim().toLowerCase()
-  const project = draft.project.trim().toLowerCase()
-  const step = draft.step.trim().toLowerCase()
-
-  return matches.find(({ job }) => {
-    const articleMatches = !articleNo || job.articleNo.toLowerCase() === articleNo
-    const projectMatches = !project || job.project.toLowerCase() === project
-    const stepMatches = !step || job.step.toLowerCase() === step
-
-    return articleMatches && projectMatches && stepMatches
-  }) ?? matches[0]
-}
-
-function getRequestStatusClassName(status: 'approved' | 'pending' | 'rejected') {
-  if (status === 'approved') {
-    return 'bg-emerald-50 text-emerald-800'
-  }
-
-  if (status === 'rejected') {
-    return 'bg-rose-50 text-rose-800'
-  }
-
-  return 'bg-amber-50 text-amber-900'
-}
-
-function NoShiftPlan({
-  canSelectShift,
-  selectedRobot,
-  selectedShiftCode,
-  setSelectedShiftCode,
+function ShiftQueueSection({
+  currentShiftCode,
+  isWorking,
+  jobs,
+  onDone,
+  onGeheftet,
+  onNotDone,
+  onSu,
   shift,
-  userName,
 }: {
-  canSelectShift: boolean
-  selectedRobot: { assetId: string; id: string; name: string }
-  selectedShiftCode: ShiftCode
-  setSelectedShiftCode: (shift: ShiftCode) => void
-  shift: string
-  userName: string
+  currentShiftCode: ShiftCode
+  isWorking: boolean
+  jobs: Job[]
+  onDone: (job: Job) => void
+  onGeheftet: (job: Job) => void
+  onNotDone: (job: Job) => void
+  onSu: (job: Job) => void
+  shift: { label: string; name: string; time: string; value: ShiftCode }
 }) {
+  const isCurrentShift = shift.value === currentShiftCode
+  const readyCount = jobs.filter((job) => job.schonGeheftet || job.jobType === 'repair').length
+
   return (
-    <main className={pageShellClassName}>
-      <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-3 lg:flex-row lg:items-center lg:justify-between lg:px-6">
-          <div>
-            <Link to="/robots" className="mb-2 inline-flex items-center gap-2 text-sm font-black text-blue-700">
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-              Anlagen-Auswahl
-            </Link>
-            <h1 className="text-2xl font-black tracking-normal text-slate-950">
-              Bediener-Board: {selectedRobot.name}
-            </h1>
-            <p className="mt-1 text-sm font-bold text-slate-500">
-              {selectedRobot.assetId} / Schicht {shift} / {userName}
-            </p>
+    <section className="scroll-mt-24">
+      <div className={`flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${isCurrentShift ? 'bg-blue-50/90' : 'bg-slate-50/90'}`}>
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-lg px-2 py-1 text-xs font-black ${isCurrentShift ? 'bg-blue-700 text-white' : 'bg-slate-900 text-white'}`}>
+              {shift.label}
+            </span>
+            <p className="font-black text-slate-950">{shift.name}</p>
+            {isCurrentShift && <span className="rounded-lg bg-white px-2 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-blue-700">Aktuelle Schicht</span>}
           </div>
-
-          <div className="flex flex-wrap gap-2">
-            {canSelectShift && (
-              <label className="grid gap-1 text-xs font-black uppercase tracking-wide text-slate-500">
-                Schicht
-                <select
-                  className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-black normal-case tracking-normal text-slate-950 shadow-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10"
-                  value={selectedShiftCode}
-                  onChange={(event) => setSelectedShiftCode(event.target.value as ShiftCode)}
-                >
-                  <option value="F">F / Frueh</option>
-                  <option value="S">S / Spaet</option>
-                  <option value="N">N / Nacht</option>
-                </select>
-              </label>
-            )}
-            <Link className={secondaryButtonClassName} to={`/robots/${selectedRobot.id}/day`}>
-              Tagesplan Live
-            </Link>
-          </div>
+          <p className="mt-1 text-xs font-bold text-slate-500">{shift.time}</p>
         </div>
-      </header>
+        <p className="text-xs font-black uppercase tracking-[0.08em] text-slate-500">
+          {jobs.length} offen / {readyCount} bereit
+        </p>
+      </div>
 
-      <section className="mx-auto max-w-4xl px-5 py-10 lg:px-6">
-        <div className={`${cardClassName} p-6`}>
-          <div className="flex items-start gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-800">
-              <AlertTriangle className="h-6 w-6" aria-hidden="true" />
-            </div>
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.14em] text-amber-700">Keine Positionen</p>
-              <h2 className="mt-1 text-2xl font-black text-slate-950">Fuer diese Anlage und Schicht ist noch kein Plan hinterlegt.</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                Der Bediener kann trotzdem jede Anlage auswaehlen. Sobald die Planung Positionen fuer diese Schicht freigibt, erscheinen sie hier im Bediener-Board.
-              </p>
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Link className={primaryButtonClassName} to="/robots">
-                  Andere Anlage waehlen
-                </Link>
-                <Link className={secondaryButtonClassName} to={`/robots/${selectedRobot.id}/day`}>
-                  Live-Ansicht oeffnen
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
+      <div className="divide-y divide-slate-100">
+        {jobs.map((job, index) => (
+          <QueueJobRow
+            index={index}
+            isWorking={isWorking}
+            job={job}
+            key={job.id}
+            onDone={onDone}
+            onGeheftet={onGeheftet}
+            onNotDone={onNotDone}
+            onSu={onSu}
+          />
+        ))}
+        {jobs.length === 0 && <p className="px-4 py-5 text-sm font-bold text-slate-400">Keine offenen Jobs in dieser Schicht.</p>}
+      </div>
+    </section>
   )
 }
 
-function BauteilCard({
-  entry,
+function QueueJobRow({
+  index,
+  isWorking,
   job,
-  onProgress,
-  onUpdate,
+  onDone,
+  onGeheftet,
+  onNotDone,
+  onSu,
 }: {
-  entry: JobEntry
-  job: ProductionJob
-  onProgress: (job: ProductionJob, progress: JobProgressState) => void
-  onUpdate: (jobId: string, nextEntry: Partial<JobEntry>) => void
+  index: number
+  isWorking: boolean
+  job: Job
+  onDone: (job: Job) => void
+  onGeheftet: (job: Job) => void
+  onNotDone: (job: Job) => void
+  onSu: (job: Job) => void
 }) {
-  const remainingQty = Math.max(job.plannedQty - entry.doneQty, 0)
-  const needsReason = entry.progress === 'not_done' || entry.progress === 'partial' || entry.progress === 'su'
-  const remainingSchlosserMinutes = getRemainingSchlosserMinutes(job, entry)
-
   return (
-    <article className={`${cardClassName} overflow-hidden`}>
-      <div className="border-l-4 border-blue-700 p-5">
+    <article className="group grid gap-3 p-4 transition hover:bg-slate-50/80 lg:grid-cols-[44px_minmax(0,1fr)_auto] lg:items-center">
+      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-sm font-black text-slate-600 transition group-hover:bg-blue-700 group-hover:text-white">
+        {index + 1}
+      </div>
+      <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          {job.priority === 'carryover' && (
-            <span className="rounded-xl bg-amber-100 px-2.5 py-1 text-xs font-black text-amber-800">
-              Rest {job.carriedFrom}
-            </span>
-          )}
-          <span className="rounded-xl bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">{job.faNumber}</span>
-          <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">
-            {job.step} / {job.fixture}
-          </span>
+          <p className="font-black text-slate-950">{job.faNumber}</p>
+          <JobStateBadge job={job} />
+          {job.isPriority && <span className="rounded-lg bg-amber-100 px-2 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-amber-800">Prio</span>}
+          {job.isHeld && <span className="rounded-lg bg-violet-100 px-2 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-violet-800">Freigabe</span>}
         </div>
-
-        <div className="mt-4 flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-black uppercase tracking-[0.12em] text-slate-500">{job.project}</p>
-            <h3 className="mt-1 text-xl font-black text-slate-950">{job.project} / Art. {job.articleNo}</h3>
-            <p className="mt-1 font-mono text-xs font-bold text-slate-500">Art. {job.articleNo}</p>
-          </div>
-          <div className="rounded-xl bg-slate-50 px-3 py-2 text-right">
-            <p className="text-xs font-black text-slate-500">Rest</p>
-            <p className="text-xl font-black text-slate-950">{remainingQty}</p>
-          </div>
-        </div>
-
-        {job.welderNote && (
-          <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">
-            Heften: {job.welderNote}
-          </p>
-        )}
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-[120px_minmax(190px,0.7fr)_1fr]">
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Ist
-            <input
-              className={inputClassName}
-              min={0}
-              max={job.plannedQty}
-              type="number"
-              value={entry.doneQty}
-              onChange={(event) => {
-                const nextQty = Number(event.target.value)
-                onUpdate(job.id, {
-                  doneQty: nextQty,
-                  progress: 'partial',
-                })
-              }}
-            />
-          </label>
-          <label className="flex h-11 items-center gap-3 self-end rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-black text-slate-700">
-            <input
-              checked={entry.weldedReady}
-              className="h-5 w-5 shrink-0 accent-blue-700"
-              type="checkbox"
-              onChange={(event) => onUpdate(job.id, { weldedReady: event.target.checked })}
-            />
-            <span className="truncate">Schon geheftet</span>
-          </label>
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Kommentar
-            <input
-              className={inputClassName}
-              value={entry.comment}
-              onChange={(event) => onUpdate(job.id, { comment: event.target.value })}
-              placeholder="z.B. nicht geheftet, wartet auf Schlosser"
-            />
-          </label>
-        </div>
-
-        <div className="mt-3 grid gap-2 rounded-xl bg-slate-50 p-3 text-xs font-bold text-slate-600 sm:grid-cols-3">
-          <p>Roboter Rest: {getRemainingRobotMinutes(job, entry)}m</p>
-          <p>Schlosser Rest: {remainingSchlosserMinutes}m</p>
-          <p>Vorrichtung: {job.fixture}</p>
-        </div>
-
-        {needsReason && (
-          <label className="mt-3 grid gap-2 text-sm font-bold text-slate-700">
-            Grund
-            <select
-              className={inputClassName}
-              value={entry.reason}
-              onChange={(event) => onUpdate(job.id, { reason: event.target.value })}
-            >
-              <option value="">Grund auswaehlen</option>
-              {delayReasons.map((reason) => (
-                <option value={reason} key={reason}>
-                  {reason}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {progressOptions.map((option) => (
-            <button
-                    className={`min-h-11 rounded-xl px-2 py-2 text-xs font-black leading-tight transition sm:text-sm ${
-                entry.progress === option.value
-                  ? 'bg-blue-700 text-white shadow-md shadow-blue-700/15'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-              key={option.value}
-              type="button"
-              onClick={() => onProgress(job, option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
+        <p className="mt-1 text-sm font-bold text-slate-500">
+          {job.projekt} / Art. {job.artikelNummer} / Schritt {job.schritt} / VR-{job.vorrichtung}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs font-black text-slate-500">
+          <span className="rounded-lg bg-slate-100 px-2 py-1">Roboter {job.remainingAnlageMinutes ?? job.anlageMinutes}m</span>
+          <span className="rounded-lg bg-slate-100 px-2 py-1">Schlosser {job.schonGeheftet ? 0 : job.schlosserMinutes}m</span>
+          <span className="rounded-lg bg-slate-100 px-2 py-1">{job.jobType === 'repair' ? 'Reparatur' : 'Produktion'}</span>
         </div>
       </div>
+      <JobActions compact isWorking={isWorking} job={job} onDone={onDone} onGeheftet={onGeheftet} onNotDone={onNotDone} onSu={onSu} />
     </article>
   )
 }
 
-function EndShiftSummary({
-  currentShift,
-  existingDelayCount,
-  extraRequests,
-  handoverConfirmed,
-  jobEntries,
-  jobs,
-  nextShiftLabel,
-  onConfirm,
-  shiftComment,
+function JobActions({
+  compact = false,
+  isWorking,
+  job,
+  onDone,
+  onGeheftet,
+  onNotDone,
+  onSu,
 }: {
-  currentShift: string
-  existingDelayCount: number
-  extraRequests: { id: string }[]
-  handoverConfirmed: boolean
-  jobEntries: Record<string, JobEntry>
-  jobs: ProductionJob[]
-  nextShiftLabel: string
-  onConfirm: () => void
-  shiftComment: string
+  compact?: boolean
+  isWorking: boolean
+  job: Job
+  onDone: (job: Job) => void
+  onGeheftet: (job: Job) => void
+  onNotDone: (job: Job) => void
+  onSu: (job: Job) => void
 }) {
-  const doneJobs = jobs.filter((job) => jobEntries[job.id].progress === 'done')
-  const suJobs = jobs.filter((job) => jobEntries[job.id].progress === 'su')
-  const unfinishedJobs = jobs.filter((job) => {
-    const entry = jobEntries[job.id]
-
-    return entry.touched && (entry.progress === 'partial' || entry.progress === 'not_done')
-  })
-  const unmarkedJobs = jobs.filter((job) => {
-    const entry = jobEntries[job.id]
-
-    return !entry.touched && entry.progress !== 'done'
-  })
-
   return (
-    <section className={`${cardClassName} mt-5 overflow-hidden border-blue-100`}>
-      <div className="border-b border-blue-100 bg-blue-50 p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-sm font-bold uppercase tracking-[0.14em] text-blue-700">
-              Schichtuebergabe
-            </p>
-            <h2 className="mt-1 text-xl font-black text-slate-950">
-              {currentShift} abschliessen und {nextShiftLabel} vorbereiten
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              SU kommt zuerst, weil die Position meistens schon in der Anlage liegt. Angefangene und unmarkierte Positionen werden Prioritaet fuer die naechste Schicht.
-            </p>
-          </div>
-          <button
-            className={handoverConfirmed ? secondaryButtonClassName : primaryButtonClassName}
-            disabled={handoverConfirmed}
-            type="button"
-            onClick={onConfirm}
-          >
-            <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
-            {handoverConfirmed ? 'Uebergabe bestaetigt' : 'Uebergabe bestaetigen'}
-          </button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 p-5 lg:grid-cols-4">
-        <SummaryCount label="Fertig" value={doneJobs.length} tone="emerald" />
-        <SummaryCount label="SU zuerst" value={suJobs.length} tone="blue" />
-        <SummaryCount label="Angefangen Prioritaet" value={unfinishedJobs.length} tone="amber" />
-        <SummaryCount label="Unmarkiert Prioritaet" value={unmarkedJobs.length} tone="rose" />
-      </div>
-
-      <div className="grid gap-5 px-5 pb-5 xl:grid-cols-3">
-        <HandoverColumn
-          emptyText="Keine SU-Positionen."
-          jobs={suJobs}
-          jobEntries={jobEntries}
-          title="1. In Anlage fortsetzen"
-          tone="blue"
-        />
-        <HandoverColumn
-          emptyText="Keine angefangenen offenen Positionen."
-          jobs={unfinishedJobs}
-          jobEntries={jobEntries}
-          title="2. Offen aus der Schicht"
-          tone="amber"
-        />
-        <HandoverColumn
-          emptyText="Keine unmarkierten Positionen."
-          jobs={unmarkedJobs}
-          jobEntries={jobEntries}
-          title="3. Unmarkiert wird Prioritaet"
-          tone="rose"
-        />
-      </div>
-
-      <div className="grid gap-4 border-t border-slate-100 p-5 lg:grid-cols-3">
-        <div className="rounded-xl bg-slate-50 p-4">
-          <p className="text-sm font-black text-slate-950">Stoerungsnotizen</p>
-          <p className="mt-1 text-sm text-slate-600">
-            {existingDelayCount + (shiftComment ? 1 : 0)} Notiz(en) an dieser Uebergabe.
-          </p>
-        </div>
-        <div className="rounded-xl bg-slate-50 p-4">
-          <p className="text-sm font-black text-slate-950">Freigabe Planung</p>
-          <p className="mt-1 text-sm text-slate-600">
-            {extraRequests.length} ungeplante Anfrage(n) warten auf Freigabe.
-          </p>
-        </div>
-        <div className="rounded-xl bg-slate-50 p-4">
-          <p className="text-sm font-black text-slate-950">Automatische Sicherung</p>
-          <p className="mt-1 text-sm text-slate-600">
-            Wenn nicht bis Schichtende bestaetigt, kann dieselbe Uebergabe als unbestaetigter Entwurf erstellt werden.
-          </p>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function SummaryCount({
-  label,
-  tone,
-  value,
-}: {
-  label: string
-  tone: 'amber' | 'blue' | 'emerald' | 'rose'
-  value: number
-}) {
-  const toneClasses = {
-    amber: 'bg-amber-50 text-amber-800',
-    blue: 'bg-blue-50 text-blue-700',
-    emerald: 'bg-emerald-50 text-emerald-700',
-    rose: 'bg-rose-50 text-rose-700',
-  }
-
-  return (
-    <div className={`rounded-xl p-4 ${toneClasses[tone]}`}>
-      <p className="text-sm font-black">{label}</p>
-      <p className="mt-2 text-2xl font-black">{value}</p>
+    <div className={`flex flex-wrap gap-2 ${compact ? 'lg:justify-end' : ''}`}>
+      <button className={smallButtonClassName} type="button" disabled={isWorking || job.schonGeheftet || job.jobType === 'repair'} onClick={() => onGeheftet(job)}>
+        Schon geheftet
+      </button>
+      <button className={smallButtonClassName} type="button" disabled={isWorking || job.status === 'done'} onClick={() => onSu(job)}>
+        SU
+      </button>
+      <button className={smallButtonClassName} type="button" disabled={isWorking || job.status === 'done'} onClick={() => onNotDone(job)}>
+        Nicht fertig
+      </button>
+      <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white shadow-lg shadow-slate-950/15 transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={isWorking || job.status === 'done'} onClick={() => onDone(job)}>
+        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+        Fertig
+      </button>
     </div>
   )
 }
 
-function HandoverColumn({
-  emptyText,
-  jobEntries,
-  jobs,
-  title,
-  tone,
+function RepairPanel({
+  duplicateJob,
+  draft,
+  isWorking,
+  onChange,
+  onCreate,
+  onCreateRepair,
+  onMoveExisting,
 }: {
-  emptyText: string
-  jobEntries: Record<string, JobEntry>
-  jobs: ProductionJob[]
-  title: string
-  tone: 'amber' | 'blue' | 'rose'
-}) {
-  const toneClasses = {
-    amber: 'border-amber-200 bg-amber-50 text-amber-900',
-    blue: 'border-blue-200 bg-blue-50 text-blue-900',
-    rose: 'border-rose-200 bg-rose-50 text-rose-900',
-  }
-
-  return (
-    <section className={`rounded-xl border p-4 ${toneClasses[tone]}`}>
-      <h3 className="text-sm font-black">{title}</h3>
-      <div className="mt-3 space-y-3">
-        {jobs.length === 0 ? (
-          <p className="text-sm opacity-75">{emptyText}</p>
-        ) : (
-          jobs.map((job) => {
-            const entry = jobEntries[job.id]
-            const restQty = Math.max(job.plannedQty - entry.doneQty, 0)
-
-            return (
-              <article className="rounded-lg bg-white/75 p-3 text-sm" key={job.id}>
-                <p className="font-black">{job.faNumber} / {job.project} / Art. {job.articleNo}</p>
-                <p className="mt-1 opacity-80">
-                  Rest {restQty} / {job.project} / {job.step} / {job.fixture}
-                </p>
-                {(entry.reason || entry.comment) && (
-                  <p className="mt-2 font-bold opacity-90">
-                    {entry.reason || entry.comment}
-                  </p>
-                )}
-              </article>
-            )
-          })
-        )}
-      </div>
-    </section>
-  )
-}
-
-function EditableJobTable({
-  jobs,
-  jobEntries,
-  onProgress,
-  onUpdate,
-}: {
-  jobs: ProductionJob[]
-  jobEntries: Record<string, JobEntry>
-  onProgress: (job: ProductionJob, progress: JobProgressState) => void
-  onUpdate: (jobId: string, nextEntry: Partial<JobEntry>) => void
+  duplicateJob: Job | null
+  draft: RepairDraft
+  isWorking: boolean
+  onChange: (patch: Partial<RepairDraft>) => void
+  onCreate: () => void
+  onCreateRepair: () => void
+  onMoveExisting: () => void
 }) {
   return (
-    <section className={`${cardClassName} overflow-hidden`}>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1080px] text-left text-sm">
-          <thead className="border-b border-slate-100 bg-slate-50 text-xs uppercase tracking-[0.12em] text-slate-500">
-            <tr>
-              <th className="px-3 py-3">FA</th>
-              <th className="px-3 py-3">Projekt</th>
-              <th className="px-3 py-3">Art.</th>
-              <th className="px-3 py-3">Schritt</th>
-              <th className="px-3 py-3">Vorrichtung</th>
-              <th className="px-3 py-3">Plan</th>
-              <th className="px-3 py-3">Ist</th>
-              <th className="px-3 py-3">Geheftet</th>
-              <th className="px-3 py-3">Status</th>
-              <th className="px-3 py-3">Grund/Kommentar</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {jobs.map((job) => {
-              const entry = jobEntries[job.id]
-
-              return (
-                <tr className={isHandled(entry) ? 'bg-slate-50 text-slate-500' : 'bg-white'} key={job.id}>
-                  <td className="px-3 py-3 font-mono text-xs font-bold">{job.faNumber}</td>
-                  <td className="px-3 py-3 font-bold">{job.project}</td>
-                  <td className="px-3 py-3">{job.articleNo}</td>
-                  <td className="px-3 py-3">{job.step}</td>
-                  <td className="px-3 py-3">{job.fixture}</td>
-                  <td className="px-3 py-3">{job.plannedQty}</td>
-                  <td className="px-3 py-3">
-                    <input
-                      className={`${inputClassName} w-20`}
-                      min={0}
-                      max={job.plannedQty}
-                      type="number"
-                      value={entry.doneQty}
-                      onChange={(event) => onUpdate(job.id, { doneQty: Number(event.target.value) })}
-                    />
-                  </td>
-                  <td className="px-3 py-3">
-                    <label className="inline-flex items-center gap-2 font-bold text-slate-700">
-                      <input
-                        checked={entry.weldedReady}
-                        className="h-5 w-5 accent-blue-700"
-                        type="checkbox"
-                        onChange={(event) => onUpdate(job.id, { weldedReady: event.target.checked })}
-                      />
-                      Ja
-                    </label>
-                  </td>
-                  <td className="px-3 py-3">
-                    <select
-                      className={`${inputClassName} min-w-36`}
-                      value={entry.progress}
-                      onChange={(event) => onProgress(job, event.target.value as JobProgressState)}
-                    >
-                      {progressOptions.map((option) => (
-                        <option value={option.value} key={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-3 py-3">
-                    <input
-                      className={`${inputClassName} min-w-72`}
-                      value={entry.comment || entry.reason}
-                      onChange={(event) => onUpdate(job.id, { comment: event.target.value })}
-                      placeholder="Grund oder Kommentar"
-                    />
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-function HandledJobs({ jobs, jobEntries }: { jobs: ProductionJob[]; jobEntries: Record<string, JobEntry> }) {
-  return (
-    <section className={`${cardClassName} p-5`}>
-      <h2 className="text-lg font-black text-slate-950">Erledigt in dieser Schicht</h2>
-      <div className="mt-4 grid gap-3">
-        {jobs.length === 0 ? (
-          <p className="rounded-xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Noch nichts erledigt.</p>
-        ) : (
-          jobs.map((job) => {
-            const entry = jobEntries[job.id]
-
-            return (
-              <article className="flex flex-col gap-2 rounded-xl bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between" key={job.id}>
-                <div>
-                  <p className="font-black text-slate-950">{job.faNumber} / {job.project} / Art. {job.articleNo}</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {job.project} / {job.step} / {job.fixture}
-                  </p>
-                </div>
-                <span className="w-fit rounded-xl bg-white px-3 py-1 text-xs font-black uppercase text-slate-600 ring-1 ring-slate-200">
-                  {getProgressLabel(entry.progress)} / Ist {entry.doneQty}
-                </span>
-              </article>
-            )
-          })
-        )}
-      </div>
-    </section>
-  )
-}
-
-function ShiftDelayPanel({
-  delayMinutes,
-  delayReason,
-  existingDelays,
-  shiftComment,
-  onAddDelay,
-  onDelayMinutesChange,
-  onDelayReasonChange,
-  onShiftCommentChange,
-}: {
-  delayMinutes: string
-  delayReason: string
-  existingDelays: { id: string; minutes: number; reason: string; comment: string }[]
-  shiftComment: string
-  onAddDelay: () => void
-  onDelayMinutesChange: (value: string) => void
-  onDelayReasonChange: (value: string) => void
-  onShiftCommentChange: (value: string) => void
-}) {
-  return (
-    <section className={`${cardClassName} p-5`}>
+    <section className="rounded-3xl border border-violet-100 bg-white/95 p-5 shadow-xl shadow-violet-100/60">
       <div className="flex items-center gap-2">
-        <Clock3 className="h-5 w-5 text-blue-700" aria-hidden="true" />
-        <h2 className="text-lg font-black text-slate-950">Allgemeine Schichtstoerung</h2>
+        <Wrench className="h-5 w-5 text-violet-700" aria-hidden="true" />
+        <h2 className="text-lg font-black text-slate-950">Job melden</h2>
       </div>
-      <p className="mt-2 text-sm leading-6 text-slate-600">
-        Nutzen, wenn die ganze Schicht verzoegert ist, z.B. Programminstallation, Roboter-Crash oder Unterbrechung.
-      </p>
-
+      <p className="mt-2 text-sm leading-6 text-slate-600">Wird als Freigabe-Job gespeichert. Der Supervisor kann ihn spaeter bestaetigen oder freigeben.</p>
       <div className="mt-4 grid gap-3">
-        <TextField label="Stoerung Minuten" type="number" value={delayMinutes} onChange={onDelayMinutesChange} />
-        <label className="grid gap-2 text-sm font-bold text-slate-700">
-          Grund
-          <select className={inputClassName} value={delayReason} onChange={(event) => onDelayReasonChange(event.target.value)}>
-            {delayReasons.map((reason) => (
-              <option value={reason} key={reason}>
-                {reason}
-              </option>
-            ))}
-          </select>
+        <TextField label="FA Nummer" value={draft.faNumber} onChange={(value) => onChange({ faNumber: value })} />
+        <TextField label="Projekt" value={draft.projekt} onChange={(value) => onChange({ projekt: value })} />
+        {duplicateJob && (
+          <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
+              <div>
+                <p className="font-black text-amber-950">Diese FA / dieser Schritt ist schon geplant.</p>
+                <p className="mt-1 text-sm font-bold leading-6 text-amber-900">
+                  {duplicateJob.faNumber} / {duplicateJob.projekt} / Art. {duplicateJob.artikelNummer} / Schritt {duplicateJob.schritt} / {formatPlanDate(duplicateJob.date)} / {getShiftName(duplicateJob.shift)}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2">
+              <button className={primaryButtonClassName} type="button" disabled={isWorking} onClick={onMoveExisting}>
+                In diese Schicht ziehen
+              </button>
+              <button className={secondaryButtonClassName} type="button" disabled={isWorking} onClick={onCreateRepair}>
+                Als Reparatur melden
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="grid min-w-0 gap-2 text-sm font-bold text-slate-700">
+            Typ
+            <select className={`${inputClassName} w-full`} value={draft.jobType} onChange={(event) => onChange({ jobType: event.target.value as Job['jobType'] })}>
+              <option value="production">Produktion</option>
+              <option value="repair">Reparatur</option>
+            </select>
+          </label>
+          <label className="grid min-w-0 gap-2 text-sm font-bold text-slate-700">
+            Schicht
+            <select className={`${inputClassName} w-full`} value={draft.shift} onChange={(event) => onChange({ shift: event.target.value as ShiftCode })}>
+              {shifts.map((shift) => (
+                <option key={shift.value} value={shift.value}>
+                  {shift.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <TextField label="Art. Nr." value={draft.artikelNummer} onChange={(value) => onChange({ artikelNummer: value })} />
+          <TextField label="Schritt" type="number" value={draft.schritt} onChange={(value) => onChange({ schritt: value })} />
+          <TextField label="VR" type="number" value={draft.vorrichtung} onChange={(value) => onChange({ vorrichtung: value })} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TextField label="Roboter min" type="number" value={draft.anlageMinutes} onChange={(value) => onChange({ anlageMinutes: value })} />
+          <TextField label="Schlosser min" type="number" value={draft.schlosserMinutes} onChange={(value) => onChange({ schlosserMinutes: value })} />
+        </div>
+        <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-700">
+          <input className="h-4 w-4 accent-blue-700" type="checkbox" checked={draft.schonGeheftet} onChange={(event) => onChange({ schonGeheftet: event.target.checked })} />
+          Schon geheftet
         </label>
-        <label className="grid gap-2 text-sm font-bold text-slate-700">
-          Schichtkommentar
-          <textarea
-            className="min-h-28 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-950 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10"
-            value={shiftComment}
-            onChange={(event) => onShiftCommentChange(event.target.value)}
-            placeholder="z.B. Anlage 45 Minuten gestoppt wegen Roboter Crash..."
-          />
-        </label>
-        <button className={`${secondaryButtonClassName} w-full px-3 text-xs sm:text-sm`} type="button" onClick={onAddDelay}>
-          <MessageSquareText className="h-4 w-4" aria-hidden="true" />
-          <span className="truncate">Stoerungsnotiz hinzufuegen</span>
+        <TextField label="Notiz" value={draft.comment} onChange={(value) => onChange({ comment: value })} />
+        <button className={`${primaryButtonClassName} w-full`} type="button" disabled={isWorking} onClick={onCreate}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Job zur Freigabe speichern
         </button>
       </div>
-
-      <div className="mt-5 space-y-3">
-        {existingDelays.map((delay) => (
-          <article className="rounded-xl bg-amber-50 p-3 text-sm" key={delay.id}>
-            <p className="font-black text-amber-900">
-              {delay.minutes} min / {delay.reason}
-            </p>
-            <p className="mt-1 leading-6 text-amber-800">{delay.comment}</p>
-          </article>
-        ))}
-        {shiftComment && (
-          <article className="rounded-xl bg-blue-50 p-3 text-sm">
-            <p className="font-black text-blue-900">
-              Entwurf / {delayMinutes} min / {delayReason}
-            </p>
-            <p className="mt-1 leading-6 text-blue-800">{shiftComment}</p>
-          </article>
-        )}
-      </div>
     </section>
+  )
+}
+
+function SuDialog({
+  isWorking,
+  job,
+  onCancel,
+  onChange,
+  onSave,
+  percent,
+}: {
+  isWorking: boolean
+  job: Job
+  onCancel: () => void
+  onChange: (value: string) => void
+  onSave: () => void
+  percent: string
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
+      <section className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/25">
+        <div className="border-b border-slate-100 p-5">
+          <p className="text-sm font-bold uppercase tracking-[0.14em] text-blue-700">SU speichern</p>
+          <h2 className="mt-1 text-xl font-black text-slate-950">{job.faNumber}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Prozent eingeben, der schon geschweisst wurde. Die Restzeit bleibt fuer die naechste Planung offen.
+          </p>
+        </div>
+        <div className="p-5">
+          <TextField label="Fertig in %" type="number" value={percent} onChange={onChange} />
+        </div>
+        <div className="flex flex-col gap-2 border-t border-slate-100 p-5 sm:flex-row sm:justify-end">
+          <button className={secondaryButtonClassName} type="button" disabled={isWorking} onClick={onCancel}>
+            Abbrechen
+          </button>
+          <button className={primaryButtonClassName} type="button" disabled={isWorking} onClick={onSave}>
+            <Save className="h-4 w-4" aria-hidden="true" />
+            SU speichern
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function JobMiniCard({ job }: { job: Job }) {
+  return (
+    <article className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+      <p className="font-black text-slate-950">{job.faNumber}</p>
+      <p className="mt-1 text-xs font-bold text-slate-500">
+        {job.projekt} / Art. {job.artikelNummer} / Schritt {job.schritt} / VR-{job.vorrichtung}
+      </p>
+    </article>
+  )
+}
+
+function JobStateBadge({ job }: { job: Job }) {
+  const state = getJobState(job)
+
+  return (
+    <span className={`inline-flex rounded-lg px-2 py-1 text-[11px] font-black uppercase tracking-[0.08em] ${state.className}`}>
+      {state.label}
+    </span>
+  )
+}
+
+function SideStat({ label, tone, value }: { label: string; tone: 'amber' | 'blue' | 'rose'; value: number }) {
+  const toneClass = {
+    amber: 'bg-amber-50 text-amber-800',
+    blue: 'bg-blue-50 text-blue-800',
+    rose: 'bg-rose-50 text-rose-800',
+  }[tone]
+
+  return (
+    <div className={`flex items-center justify-between rounded-xl p-4 ${toneClass}`}>
+      <span className="text-sm font-black">{label}</span>
+      <span className="text-xl font-black">{value}</span>
+    </div>
+  )
+}
+
+function Toast({ notice, onClose }: { notice: OperatorNotice; onClose: () => void }) {
+  const className = {
+    error: 'border-rose-100 bg-rose-50/95 text-rose-950',
+    info: 'border-blue-100 bg-blue-50/95 text-blue-950',
+    success: 'border-emerald-100 bg-emerald-50/95 text-emerald-950',
+  }[notice.tone]
+  const iconClass = {
+    error: 'bg-rose-100 text-rose-700',
+    info: 'bg-blue-100 text-blue-700',
+    success: 'bg-emerald-100 text-emerald-700',
+  }[notice.tone]
+
+  return (
+    <article className={`fixed right-4 top-20 z-50 flex w-[calc(100%-2rem)] max-w-md items-start gap-3 rounded-2xl border p-4 shadow-2xl shadow-slate-950/15 backdrop-blur sm:right-6 ${className}`}>
+      <span className={`mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconClass}`}>
+        {notice.tone === 'error' ? <AlertTriangle className="h-4 w-4" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-black">{notice.tone === 'error' ? 'Aktion nicht moeglich' : notice.tone === 'success' ? 'Gespeichert' : 'Hinweis'}</p>
+        <p className="mt-1 text-sm font-bold leading-6">{notice.text}</p>
+      </div>
+      <button className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg opacity-70 transition hover:bg-white/70 hover:opacity-100" type="button" onClick={onClose} aria-label="Meldung schliessen">
+        <X className="h-4 w-4" aria-hidden="true" />
+      </button>
+    </article>
   )
 }
 
 function TextField({
   label,
   onChange,
-  placeholder,
   type = 'text',
   value,
 }: {
   label: string
   onChange: (value: string) => void
-  placeholder?: string
   type?: string
   value: string
 }) {
   return (
     <label className="grid min-w-0 gap-2 text-sm font-bold text-slate-700">
       {label}
-      <input
-        className={`${inputClassName} w-full min-w-0`}
-        placeholder={placeholder}
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
+      <input className={`${inputClassName} w-full`} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   )
 }
 
-function getInitialProgress(job: ProductionJob): JobProgressState {
-  if (job.doneQty >= job.plannedQty) {
-    return 'done'
-  }
-
-  if (job.doneQty > 0) {
-    return 'partial'
-  }
-
-  return 'partial'
-}
-
-function isHandled(entry: JobEntry) {
-  return entry.progress === 'done' || entry.progress === 'not_done' || entry.progress === 'su'
-}
-
-function getRemainingRobotMinutes(job: ProductionJob, entry: JobEntry) {
-  const remainingQty = Math.max(job.plannedQty - entry.doneQty, 0)
-  return job.anlageMin * remainingQty + (remainingQty > 0 ? job.ruestzeitMin : 0)
-}
-
-function getRemainingSchlosserMinutes(job: ProductionJob, entry: JobEntry) {
-  if (entry.weldedReady) {
-    return 0
-  }
-
-  const remainingQty = Math.max(job.plannedQty - entry.doneQty, 0)
-  return job.schlosserMin * remainingQty
-}
-
-function getProgressLabel(progress: JobProgressState) {
-  return progressOptions.find((option) => option.value === progress)?.label ?? progress
-}
-
-function getNextShiftLabel(shift: string) {
-  if (shift === 'F') {
-    return 'Spaetschicht'
-  }
-
-  if (shift === 'S') {
-    return 'Nachtschicht'
-  }
-
-  return 'Fruehschicht'
-}
-
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className={`${cardClassName} p-4`}>
-      <div className="flex items-center gap-2 text-blue-700">
-        {icon}
-        <span className="text-xs font-black uppercase tracking-[0.12em]">{label}</span>
+    <article className={`${cardClassName} p-4`}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">{label}</p>
+          <p className="mt-2 text-2xl font-black text-slate-950">{value}</p>
+        </div>
+        <span className="rounded-xl bg-blue-50 p-3 text-blue-700">{icon}</span>
       </div>
-      <p className="mt-3 text-xl font-black text-slate-950">{value}</p>
-    </div>
+    </article>
   )
 }
+
+function findRobotFromRoute(robots: Robot[], routeRobotId?: string) {
+  const routeId = routeRobotId?.toLowerCase() ?? ''
+
+  return (
+    robots.find((robot) => robot.id === routeRobotId) ??
+    robots.find((robot) => robot.assetId.toLowerCase() === routeId || robot.assetId.toLowerCase().replace(/[^a-z0-9]/g, '') === routeId)
+  )
+}
+
+function sortOperatorJobs(jobs: Job[]) {
+  return [...jobs].sort((first, second) => {
+    if (first.shift !== second.shift) return shiftOrder[first.shift] - shiftOrder[second.shift]
+    if (first.status === 'running' && second.status !== 'running') return -1
+    if (second.status === 'running' && first.status !== 'running') return 1
+    if (first.carriedFromPreviousShift !== second.carriedFromPreviousShift) return first.carriedFromPreviousShift ? -1 : 1
+    if (first.isPriority !== second.isPriority) return first.isPriority ? -1 : 1
+    if (first.schonGeheftet !== second.schonGeheftet) return first.schonGeheftet ? -1 : 1
+    if (first.vorrichtung !== second.vorrichtung) return first.vorrichtung - second.vorrichtung
+    if (first.faNumber !== second.faNumber) return first.faNumber.localeCompare(second.faNumber)
+    return first.schritt - second.schritt
+  })
+}
+
+function getJobState(job: Job) {
+  if (job.status === 'done') {
+    return { className: 'bg-emerald-100 text-emerald-700', label: 'Fertig' }
+  }
+
+  if (job.status === 'blocked') {
+    return { className: 'bg-rose-100 text-rose-700', label: 'Blockiert' }
+  }
+
+  if (job.jobType === 'repair') {
+    return { className: 'bg-rose-100 text-rose-700', label: 'Reparatur' }
+  }
+
+  if (job.progressPercent && job.progressPercent > 0 && job.progressPercent < 100) {
+    return { className: 'bg-blue-100 text-blue-700', label: `SU ${job.progressPercent}%` }
+  }
+
+  if (job.schonGeheftet) {
+    return { className: 'bg-blue-100 text-blue-700', label: 'Bereit' }
+  }
+
+  return { className: 'bg-amber-100 text-amber-800', label: 'Wartet auf Heften' }
+}
+
+function getNextShift(shift: ShiftCode): ShiftCode {
+  if (shift === 'N') return 'F'
+  if (shift === 'F') return 'S'
+  return 'N'
+}
+
+function getNextShiftDate(date: string, shift: ShiftCode) {
+  if (shift !== 'S') return date
+
+  const parsedDate = new Date(`${date}T00:00:00`)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return date
+  }
+
+  parsedDate.setDate(parsedDate.getDate() + 1)
+  return parsedDate.toISOString().slice(0, 10)
+}
+
+function getShiftName(shift: ShiftCode) {
+  return shifts.find((item) => item.value === shift)?.name ?? shift
+}
+
+function findExistingProductionJob(jobs: Job[], draft: RepairDraft) {
+  const faNumber = draft.faNumber.trim().toLowerCase()
+  const schritt = toNumber(draft.schritt, 0)
+
+  if (!faNumber || schritt <= 0) {
+    return null
+  }
+
+  return (
+    jobs.find(
+      (job) =>
+        job.jobType === 'production' &&
+        job.faNumber.trim().toLowerCase() === faNumber &&
+        job.schritt === schritt,
+    ) ?? null
+  )
+}
+
+function formatPlanDate(date: string) {
+  const parsedDate = new Date(`${date}T00:00:00`)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return date
+  }
+
+  return new Intl.DateTimeFormat('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(parsedDate)
+}
+
+function toNumber(value: string, fallback: number) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : fallback
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min
+  return Math.min(Math.max(value, min), max)
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Unbekannter Fehler'
+}
+
+const shiftOrder: Record<ShiftCode, number> = { N: 1, F: 2, S: 3 }
+
+const smallButtonClassName =
+  'inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40'
