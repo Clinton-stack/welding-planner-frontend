@@ -32,6 +32,7 @@ export type Job = {
   isPriority: boolean
   isForced: boolean
   isHeld: boolean
+  planOrder?: number | null
   approvalStatus?: ApprovalStatus
   createdByName?: string | null
   createdByRole?: string | null

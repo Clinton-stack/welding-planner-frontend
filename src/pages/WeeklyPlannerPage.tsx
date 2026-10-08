@@ -110,8 +110,28 @@ type PendingPlanChange = {
   shift: ShiftCode
 }
 
-const plannerDate = '2026-06-08'
+type PlanOrderEntry = {
+  date: string
+  order: number
+  robotId: string
+  shift: ShiftCode
+}
+
+type BauteilTemplateStep = {
+  anlageMinutes: number
+  schlosserMinutes: number
+  schritt: number
+}
+
+type BauteilTemplate = {
+  artikelNummer: string
+  projekt: string
+  steps: BauteilTemplateStep[]
+}
+
+const plannerDate = getTodayDateString()
 const jobPoolStorageKey = 'weekly-planner-job-pool-ids'
+const planOrderStorageKey = 'weekly-planner-plan-order'
 const robotShiftWorkingMinutes = 430
 
 const shifts: { label: string; name: string; time: string; value: ShiftCode }[] = [
@@ -142,6 +162,109 @@ const emptyCapacityForm: CapacityForm = {
   S: { schlosserCount: '3', vorrichtungCount: '3', targetRobotPercent: '100' },
 }
 
+const bauteilTemplates: BauteilTemplate[] = [
+  createPesaTemplate('90', [
+    { schritt: 1, anlageMinutes: 35, schlosserMinutes: 50 },
+    { schritt: 2, anlageMinutes: 80, schlosserMinutes: 110 },
+    { schritt: 3, anlageMinutes: 70, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 140, schlosserMinutes: 190 },
+    { schritt: 5, anlageMinutes: 35, schlosserMinutes: 45 },
+  ]),
+  createPesaTemplate('91', [
+    { schritt: 1, anlageMinutes: 40, schlosserMinutes: 60 },
+    { schritt: 2, anlageMinutes: 90, schlosserMinutes: 120 },
+    { schritt: 3, anlageMinutes: 70, schlosserMinutes: 90 },
+    { schritt: 4, anlageMinutes: 150, schlosserMinutes: 210 },
+    { schritt: 5, anlageMinutes: 40, schlosserMinutes: 50 },
+  ]),
+  createPesaTemplate('92', [
+    { schritt: 1, anlageMinutes: 45, schlosserMinutes: 60 },
+    { schritt: 2, anlageMinutes: 85, schlosserMinutes: 115 },
+    { schritt: 3, anlageMinutes: 75, schlosserMinutes: 95 },
+    { schritt: 4, anlageMinutes: 155, schlosserMinutes: 205 },
+    { schritt: 5, anlageMinutes: 40, schlosserMinutes: 50 },
+  ]),
+  createPesaTemplate('93', [
+    { schritt: 1, anlageMinutes: 30, schlosserMinutes: 40 },
+    { schritt: 2, anlageMinutes: 85, schlosserMinutes: 120 },
+    { schritt: 3, anlageMinutes: 70, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 160, schlosserMinutes: 215 },
+    { schritt: 5, anlageMinutes: 35, schlosserMinutes: 45 },
+  ]),
+  createPesaTemplate('94', [
+    { schritt: 1, anlageMinutes: 50, schlosserMinutes: 70 },
+    { schritt: 2, anlageMinutes: 95, schlosserMinutes: 130 },
+    { schritt: 3, anlageMinutes: 75, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 165, schlosserMinutes: 220 },
+    { schritt: 5, anlageMinutes: 45, schlosserMinutes: 60 },
+  ]),
+  createPesaTemplate('95', [
+    { schritt: 1, anlageMinutes: 55, schlosserMinutes: 70 },
+    { schritt: 2, anlageMinutes: 95, schlosserMinutes: 115 },
+    { schritt: 3, anlageMinutes: 75, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 165, schlosserMinutes: 220 },
+    { schritt: 5, anlageMinutes: 45, schlosserMinutes: 60 },
+  ]),
+  createPesaTemplate('98', [
+    { schritt: 1, anlageMinutes: 45, schlosserMinutes: 65 },
+    { schritt: 2, anlageMinutes: 90, schlosserMinutes: 125 },
+    { schritt: 3, anlageMinutes: 80, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 170, schlosserMinutes: 225 },
+    { schritt: 5, anlageMinutes: 40, schlosserMinutes: 55 },
+  ]),
+  createPesaTemplate('99', [
+    { schritt: 1, anlageMinutes: 25, schlosserMinutes: 30 },
+    { schritt: 2, anlageMinutes: 75, schlosserMinutes: 120 },
+    { schritt: 3, anlageMinutes: 70, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 130, schlosserMinutes: 200 },
+    { schritt: 5, anlageMinutes: 35, schlosserMinutes: 45 },
+  ]),
+  createPesaTemplate('100', [
+    { schritt: 1, anlageMinutes: 30, schlosserMinutes: 40 },
+    { schritt: 2, anlageMinutes: 85, schlosserMinutes: 115 },
+    { schritt: 3, anlageMinutes: 70, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 145, schlosserMinutes: 205 },
+    { schritt: 5, anlageMinutes: 35, schlosserMinutes: 50 },
+  ]),
+  createPesaTemplate('101', [
+    { schritt: 1, anlageMinutes: 40, schlosserMinutes: 55 },
+    { schritt: 2, anlageMinutes: 90, schlosserMinutes: 125 },
+    { schritt: 3, anlageMinutes: 75, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 155, schlosserMinutes: 215 },
+    { schritt: 5, anlageMinutes: 40, schlosserMinutes: 55 },
+  ]),
+  createPesaTemplate('102', [
+    { schritt: 1, anlageMinutes: 70, schlosserMinutes: 90 },
+    { schritt: 2, anlageMinutes: 110, schlosserMinutes: 150 },
+    { schritt: 3, anlageMinutes: 80, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 170, schlosserMinutes: 220 },
+    { schritt: 5, anlageMinutes: 45, schlosserMinutes: 60 },
+  ]),
+  createPesaTemplate('103', [
+    { schritt: 1, anlageMinutes: 55, schlosserMinutes: 70 },
+    { schritt: 2, anlageMinutes: 100, schlosserMinutes: 140 },
+    { schritt: 3, anlageMinutes: 85, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 155, schlosserMinutes: 210 },
+    { schritt: 5, anlageMinutes: 40, schlosserMinutes: 55 },
+  ]),
+  createPesaTemplate('116', [
+    { schritt: 1, anlageMinutes: 60, schlosserMinutes: 75 },
+    { schritt: 2, anlageMinutes: 95, schlosserMinutes: 130 },
+    { schritt: 3, anlageMinutes: 80, schlosserMinutes: 0 },
+    { schritt: 4, anlageMinutes: 150, schlosserMinutes: 205 },
+    { schritt: 5, anlageMinutes: 40, schlosserMinutes: 55 },
+    { schritt: 6, anlageMinutes: 45, schlosserMinutes: 60 },
+  ]),
+]
+
+function createPesaTemplate(artikelNummer: string, steps: BauteilTemplateStep[]): BauteilTemplate {
+  return {
+    artikelNummer,
+    projekt: 'PESA',
+    steps,
+  }
+}
+
 export function WeeklyPlannerPage() {
   const { currentUser } = useCurrentUser()
   const backPath = currentUser.role === 'Supervisor' || currentUser.role === 'Admin' ? '/supervisor' : '/robots'
@@ -157,8 +280,9 @@ export function WeeklyPlannerPage() {
   const [planningStartDate, setPlanningStartDate] = useState(plannerDate)
   const [planningStartShift, setPlanningStartShift] = useState<ShiftCode>('N')
   const [jobPoolIds, setJobPoolIds] = useState<Set<string>>(() => readStoredJobPoolIds())
+  const [planOrder, setPlanOrder] = useState<Map<string, PlanOrderEntry>>(() => readStoredPlanOrder())
   const [pendingPlanChanges, setPendingPlanChanges] = useState<Map<string, PendingPlanChange>>(() => new Map())
-  const [openPlanDates, setOpenPlanDates] = useState<Set<string>>(() => new Set([plannerDate]))
+  const [currentPlanDate, setCurrentPlanDate] = useState(plannerDate)
   const [isLoading, setIsLoading] = useState(true)
   const [isWorking, setIsWorking] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
@@ -166,6 +290,9 @@ export function WeeklyPlannerPage() {
   const attachJobsInputRef = useRef<HTMLInputElement>(null)
 
   const selectedRobot = robots.find((robot) => robot.id === selectedRobotId)
+  const selectedBauteilTemplate = useMemo(() => findBauteilTemplate(draft.projekt, draft.artikelNummer), [draft.artikelNummer, draft.projekt])
+  const selectedTemplateStep = selectedBauteilTemplate?.steps.find((step) => step.schritt === toNumber(draft.schritt, 1))
+  const hasMissingTemplateSteps = Boolean(selectedBauteilTemplate && draft.jobType === 'production' && toNumber(draft.schritt, 1) > Math.min(...selectedBauteilTemplate.steps.map((step) => step.schritt)))
 
   const dismissToast = useCallback((id: string) => {
     setToasts((current) => current.filter((toast) => toast.id !== id))
@@ -208,12 +335,11 @@ export function WeeklyPlannerPage() {
       const [nextJobs, nextCapacities, nextRecommendation] = await Promise.all([
         getJobs({ robotId: nextRobotId }),
         getShiftCapacities({ robotId: nextRobotId, date: planningStartDate }),
-        shouldLoadRecommendation ? getPlannerRecommendation(nextRobotId, plannerDate).catch(() => null) : Promise.resolve(null),
+        shouldLoadRecommendation ? getPlannerRecommendation(nextRobotId, planningStartDate).catch(() => null) : Promise.resolve(null),
       ])
       setJobs(sortJobs(nextJobs))
       setPendingPlanChanges(new Map())
       setJobPoolIds(new Set(nextJobs.filter((job) => job.isHeld).map((job) => job.id)))
-      setOpenPlanDates((current) => mergeOpenPlanDates(current, nextJobs))
       setCapacityForm(createCapacityForm(nextCapacities))
       if (shouldLoadRecommendation) {
         setRecommendation(nextRecommendation)
@@ -235,6 +361,10 @@ export function WeeklyPlannerPage() {
   useEffect(() => {
     storeJobPoolIds(jobPoolIds)
   }, [jobPoolIds])
+
+  useEffect(() => {
+    storePlanOrder(planOrder)
+  }, [planOrder])
 
   useEffect(() => {
     if (!selectedRobotId) return
@@ -282,16 +412,23 @@ export function WeeklyPlannerPage() {
   )
   const normalPlanJobs = useMemo(
     () =>
-      jobs
-        .filter((job) => !job.isHeld && !isPendingApproval(job) && job.approvalStatus !== 'rejected')
-        .map((job) => {
+      sortJobsWithPlanOrder(
+        jobs
+          .filter((job) => !job.isHeld && !isPendingApproval(job) && job.approvalStatus !== 'rejected')
+          .map((job) => {
           const pendingChange = pendingPlanChanges.get(job.id)
 
           return pendingChange ? { ...job, date: pendingChange.date, isForced: true, shift: pendingChange.shift } : job
         }),
-    [jobs, pendingPlanChanges],
+        planOrder,
+      ),
+    [jobs, pendingPlanChanges, planOrder],
   )
   const planDates = useMemo(() => createPlanDateGroups(normalPlanJobs), [normalPlanJobs])
+  const currentPlanDateGroup = useMemo(
+    () => planDates.find((dateGroup) => dateGroup.date === currentPlanDate) ?? null,
+    [currentPlanDate, planDates],
+  )
   const activeJobs = normalPlanJobs.filter((job) => job.status !== 'done' && job.status !== 'blocked')
   const plannedRobotMinutes = activeJobs.reduce((sum, job) => sum + (job.remainingAnlageMinutes ?? job.anlageMinutes), 0)
   const readyJobs = activeJobs.filter((job) => job.schonGeheftet).length
@@ -352,6 +489,98 @@ export function WeeklyPlannerPage() {
       setRecommendation(null)
       setDraft((current) => ({ ...emptyDraft, projekt: current.projekt }))
       showToast('Job wurde in die Vorliste gelegt.')
+      await loadPlannerData(selectedRobotId)
+    } catch (error) {
+      showToast(getErrorMessage(error), 'error')
+    } finally {
+      setIsWorking(false)
+    }
+  }
+
+  const handleApplyTemplateStep = () => {
+    if (!selectedTemplateStep) {
+      showToast('Keine Vorlage fuer diesen Artikel/Schritt gefunden.', 'error')
+      return
+    }
+
+    setDraft((current) => ({
+      ...current,
+      anlageMinutes: String(selectedTemplateStep.anlageMinutes),
+      schlosserMinutes: current.schonGeheftet ? '0' : String(selectedTemplateStep.schlosserMinutes),
+    }))
+    showToast(`Vorlage fuer Schritt ${selectedTemplateStep.schritt} uebernommen.`)
+  }
+
+  const handleCreateTemplateChain = async () => {
+    if (!selectedRobotId) {
+      showToast('Bitte zuerst eine Anlage waehlen oder Demo-Daten anlegen.', 'error')
+      return
+    }
+
+    if (!selectedBauteilTemplate) {
+      showToast('Keine Bauteil-Vorlage fuer Projekt und Artikel gefunden.', 'error')
+      return
+    }
+
+    if (!draft.faNumber.trim()) {
+      showToast('FA Nummer ist Pflicht fuer eine Bauteil-Kette.', 'error')
+      return
+    }
+
+    setIsWorking(true)
+    clearToasts()
+
+    try {
+      const faNumber = draft.faNumber.trim()
+      const existingSteps = new Set(
+        jobs
+          .filter((job) => job.robotId === selectedRobotId && job.faNumber === faNumber && job.jobType === 'production')
+          .map((job) => job.schritt),
+      )
+      const createdJobIds: string[] = []
+      let skippedSteps = 0
+
+      for (const step of selectedBauteilTemplate.steps) {
+        if (existingSteps.has(step.schritt)) {
+          skippedSteps += 1
+          continue
+        }
+
+        const isCurrentDraftStep = step.schritt === toNumber(draft.schritt, 1)
+        const schonGeheftet = isCurrentDraftStep && draft.schonGeheftet
+        const createdJob = await createJob({
+          faNumber,
+          projekt: selectedBauteilTemplate.projekt,
+          artikelNummer: selectedBauteilTemplate.artikelNummer,
+          schritt: step.schritt,
+          vorrichtung: toNumber(draft.vorrichtung, 1),
+          menge: toNumber(draft.menge, 1),
+          robotId: selectedRobotId,
+          anlageMinutes: step.anlageMinutes,
+          schlosserMinutes: schonGeheftet ? 0 : step.schlosserMinutes,
+          ruestMinutes: 0,
+          jobType: 'production',
+          schonGeheftet,
+          isPriority: draft.isPriority,
+          isForced: draft.isForced,
+          isHeld: true,
+          status: 'open',
+          date: planningStartDate,
+          shift: planningStartShift,
+        })
+
+        createdJobIds.push(createdJob.id)
+      }
+
+      setJobPoolIds((current) => new Set([...current, ...createdJobIds]))
+      setRecommendation(null)
+      setRecommendationDateIndex(0)
+      showToast(
+        skippedSteps > 0
+          ? `${createdJobIds.length} Schritt(e) aus Vorlage angelegt. ${skippedSteps} vorhandene Schritt(e) uebersprungen.`
+          : `${createdJobIds.length} Schritt(e) aus Vorlage in die Vorliste gelegt.`,
+        createdJobIds.length > 0 ? 'success' : 'info',
+      )
       await loadPlannerData(selectedRobotId)
     } catch (error) {
       showToast(getErrorMessage(error), 'error')
@@ -518,21 +747,20 @@ export function WeeklyPlannerPage() {
 
       const placedJobs = getRecommendationPlacements(recommendation)
       const unplacedJobs = jobPoolJobs.filter((job) => !placedJobs.has(job.id))
+      const placedJobsInRecommendationOrder = [...placedJobs.entries()].sort(([, first], [, second]) => comparePlacement(first, second))
 
-      for (const job of jobPoolJobs) {
-        const placement = placedJobs.get(job.id)
-
-        if (!placement) continue
-
-        await updateJob(job.id, {
+      for (const [jobId, placement] of placedJobsInRecommendationOrder) {
+        await updateJob(jobId, {
           date: placement.date,
           shift: placement.shift,
           isForced: false,
           isHeld: false,
+          planOrder: placement.order,
         })
       }
 
       setJobPoolIds(new Set(unplacedJobs.map((job) => job.id)))
+      setPlanOrder((current) => mergePlanOrder(current, selectedRobotId, placedJobs))
       setPendingPlanChanges(new Map())
       setRecommendation(null)
       setRecommendationDateIndex(0)
@@ -891,20 +1119,6 @@ export function WeeklyPlannerPage() {
     showToast(`${job.faNumber} wurde verschoben. Speichere den aktuellen Plan, um die Datenbank zu aktualisieren.`)
   }
 
-  const togglePlanDate = (date: string) => {
-    setOpenPlanDates((current) => {
-      const next = new Set(current)
-
-      if (next.has(date)) {
-        next.delete(date)
-      } else {
-        next.add(date)
-      }
-
-      return next
-    })
-  }
-
   return (
     <main className={pageShellClassName}>
       <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur">
@@ -1041,12 +1255,45 @@ export function WeeklyPlannerPage() {
                     type="date"
                     value={planningStartDate}
                     onChange={(value) => {
-                      setPlanningStartDate(value || plannerDate)
+                      const nextDate = value || plannerDate
+
+                      setPlanningStartDate(nextDate)
+                      setCurrentPlanDate(nextDate)
                       setRecommendation(null)
                       setRecommendationDateIndex(0)
                     }}
                   />
                 </div>
+
+                {selectedBauteilTemplate && (
+                  <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <p className="text-sm font-black text-blue-950">
+                          Vorlage gefunden: {selectedBauteilTemplate.projekt} / Art. {selectedBauteilTemplate.artikelNummer}
+                        </p>
+                        <p className="mt-1 text-xs font-bold leading-5 text-blue-800">
+                          {selectedBauteilTemplate.steps.length} Schritte: {selectedBauteilTemplate.steps.map((step) => `S${step.schritt} ${step.anlageMinutes}m/${step.schlosserMinutes}m`).join(' · ')}
+                        </p>
+                        {hasMissingTemplateSteps && (
+                          <p className="mt-2 text-xs font-black text-amber-700">
+                            Hinweis: Du erfasst einen spaeteren Schritt. Fuer saubere Bediener-Freigabe sollte die komplette FA-Kette angelegt werden.
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button className={secondaryButtonClassName} type="button" onClick={handleApplyTemplateStep} disabled={isWorking || !selectedTemplateStep}>
+                          <Timer className="h-4 w-4" aria-hidden="true" />
+                          Zeit uebernehmen
+                        </button>
+                        <button className={primaryButtonClassName} type="button" onClick={() => void handleCreateTemplateChain()} disabled={isWorking || !selectedRobotId}>
+                          <Plus className="h-4 w-4" aria-hidden="true" />
+                          Ganze Kette anlegen
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex flex-wrap gap-2">
@@ -1340,58 +1587,65 @@ export function WeeklyPlannerPage() {
             />
 
             <section className={`${cardClassName} p-5`}>
-              <SectionTitle kicker="5. Aktueller Plan" title="Jobs nach Datum und Schicht" text="Ueberlauf bleibt sichtbar, auch wenn Jobs auf den naechsten Produktionstag rollen." />
+              <SectionTitle kicker="5. Aktueller Plan" title="Ein Produktionstag im Fokus" text="Waehle einen Tag aus, statt den ganzen Jahresplan untereinander zu laden." />
               <div className="mt-5 space-y-3">
-                {planDates.map((dateGroup) => {
-                  const isOpen = openPlanDates.has(dateGroup.date)
-                  const hasDatePendingChanges = [...pendingPlanChanges.values()].some((change) => change.date === dateGroup.date)
+                <div className="flex flex-col gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <TextField className="w-44" label="Anzeigen" type="date" value={currentPlanDate} onChange={(value) => setCurrentPlanDate(value || plannerDate)} />
+                    <button className={secondaryButtonClassName} type="button" onClick={() => setCurrentPlanDate(plannerDate)}>
+                      Heute
+                    </button>
+                    {planDates.map((dateGroup) => (
+                      <button
+                        className={`rounded-lg px-3 py-2 text-xs font-black transition ${
+                          dateGroup.date === currentPlanDate ? 'bg-slate-950 text-white shadow-sm shadow-slate-950/15' : 'bg-white text-slate-600 ring-1 ring-slate-100 hover:bg-blue-50 hover:text-blue-700'
+                        }`}
+                        key={dateGroup.date}
+                        type="button"
+                        onClick={() => setCurrentPlanDate(dateGroup.date)}
+                      >
+                        {formatShortPlanDate(dateGroup.date)} · {dateGroup.totalJobs}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className={`inline-flex h-10 items-center justify-center gap-2 rounded-lg px-3 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                      [...pendingPlanChanges.values()].some((change) => change.date === currentPlanDate) ? 'bg-blue-700 text-white shadow-sm shadow-blue-700/20 hover:bg-blue-800' : 'bg-white text-slate-400 ring-1 ring-slate-100'
+                    }`}
+                    disabled={![...pendingPlanChanges.values()].some((change) => change.date === currentPlanDate) || isWorking}
+                    onClick={() => void handleSaveCurrentPlan()}
+                    type="button"
+                  >
+                    <Save className="h-4 w-4" aria-hidden="true" />
+                    Plan speichern
+                  </button>
+                </div>
 
-                  return (
-                    <article className="overflow-hidden rounded-xl border border-slate-100" key={dateGroup.date}>
-                      <div className="flex flex-col gap-3 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <button className="min-w-0 text-left" type="button" onClick={() => togglePlanDate(dateGroup.date)}>
-                          <p className="font-black text-slate-950">{formatPlanDate(dateGroup.date)}</p>
-                          <p className="mt-1 text-xs font-bold text-slate-500">{dateGroup.totalJobs} Jobs geplant</p>
-                        </button>
-                        <div className="flex flex-wrap gap-2 sm:justify-end">
-                          <button
-                            className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                              hasDatePendingChanges ? 'bg-blue-700 text-white shadow-sm shadow-blue-700/20 hover:bg-blue-800' : 'bg-white text-slate-400 ring-1 ring-slate-100'
-                            }`}
-                            disabled={!hasDatePendingChanges || isWorking}
-                            onClick={() => void handleSaveCurrentPlan()}
-                            type="button"
-                          >
-                            <Save className="h-4 w-4" aria-hidden="true" />
-                            Plan speichern
-                          </button>
-                          <button className="rounded-lg bg-white px-2 py-1 text-xs font-black text-slate-600" type="button" onClick={() => togglePlanDate(dateGroup.date)}>
-                            {isOpen ? 'Schliessen' : 'Oeffnen'}
-                          </button>
-                        </div>
-                      </div>
-
-                      {isOpen && (
-                        <div className="grid gap-3 border-t border-slate-100 p-3 xl:grid-cols-3">
-                          {shifts.map((shift) => (
-                            <CurrentShiftCard
-                              date={dateGroup.date}
-                              isWorking={isWorking}
-                              jobs={dateGroup.shifts[shift.value]}
-                              key={shift.value}
-                              onDeleteJob={requestDeleteJob}
-                              onEditJob={openEditJob}
-                              onDropJob={(jobId) => void handleMoveJobToShift(jobId, dateGroup.date, shift.value)}
-                              onReopenJob={(job) => void handleReopenJob(job)}
-                              shift={shift}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </article>
-                  )
-                })}
-                {planDates.length === 0 && <p className="rounded-xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Noch keine Jobs geplant.</p>}
+                {currentPlanDateGroup ? (
+                  <article className="overflow-hidden rounded-xl border border-slate-100">
+                    <div className="flex flex-col gap-1 bg-white px-4 py-3">
+                      <p className="font-black text-slate-950">{formatPlanDate(currentPlanDateGroup.date)}</p>
+                      <p className="text-xs font-bold text-slate-500">{currentPlanDateGroup.totalJobs} Jobs geplant</p>
+                    </div>
+                    <div className="grid gap-3 border-t border-slate-100 p-3 xl:grid-cols-3">
+                      {shifts.map((shift) => (
+                        <CurrentShiftCard
+                          date={currentPlanDateGroup.date}
+                          isWorking={isWorking}
+                          jobs={currentPlanDateGroup.shifts[shift.value]}
+                          key={shift.value}
+                          onDeleteJob={requestDeleteJob}
+                          onEditJob={openEditJob}
+                          onDropJob={(jobId) => void handleMoveJobToShift(jobId, currentPlanDateGroup.date, shift.value)}
+                          onReopenJob={(job) => void handleReopenJob(job)}
+                          shift={shift}
+                        />
+                      ))}
+                    </div>
+                  </article>
+                ) : (
+                  <p className="rounded-xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Keine Jobs fuer diesen Tag geplant.</p>
+                )}
               </div>
             </section>
           </section>
@@ -2357,7 +2611,7 @@ function getShiftKey(date: string, shift: ShiftCode) {
 }
 
 function getAppendStart(lockedJobs: Job[], fallbackDate: string, fallbackShift: ShiftCode): { date: string; shift: ShiftCode } {
-  const appendableJobs = lockedJobs.filter(isActivePlannedJob)
+  const appendableJobs = lockedJobs.filter((job) => isActivePlannedJob(job) && job.date >= fallbackDate)
 
   if (appendableJobs.length === 0) {
     return { date: fallbackDate, shift: fallbackShift }
@@ -2706,16 +2960,19 @@ function addDays(date: string, days: number) {
 }
 
 function getRecommendationPlacements(recommendation: PlannerRecommendation) {
-  const placements = new Map<string, { date: string; shift: ShiftCode }>()
+  const placements = new Map<string, { date: string; order: number; shift: ShiftCode }>()
   const slides = recommendation.forwardShiftSimulations?.length
     ? recommendation.forwardShiftSimulations
     : [{ date: recommendation.date, shiftSimulations: recommendation.shiftSimulations }]
 
   for (const slide of slides) {
     for (const shiftSimulation of slide.shiftSimulations) {
-      for (const plannedJob of shiftSimulation.plannedJobs) {
+      const lockedOrderOffset = getNextPlanOrder(shiftSimulation.lockedJobs ?? [])
+
+      for (const [order, plannedJob] of shiftSimulation.plannedJobs.entries()) {
         placements.set(plannedJob.job.id, {
           date: slide.date,
+          order: lockedOrderOffset + order,
           shift: shiftSimulation.shift,
         })
       }
@@ -2723,6 +2980,29 @@ function getRecommendationPlacements(recommendation: PlannerRecommendation) {
   }
 
   return placements
+}
+
+function getNextPlanOrder(jobs: Job[]) {
+  const existingOrders = jobs
+    .map((job) => job.planOrder)
+    .filter((order): order is number => typeof order === 'number')
+
+  if (existingOrders.length > 0) {
+    return Math.max(...existingOrders) + 1
+  }
+
+  return jobs.length
+}
+
+function comparePlacement(
+  first: { date: string; order: number; shift: ShiftCode },
+  second: { date: string; order: number; shift: ShiftCode },
+) {
+  const shiftOrder: Record<ShiftCode, number> = { N: 1, F: 2, S: 3 }
+
+  if (first.date !== second.date) return first.date.localeCompare(second.date)
+  if (first.shift !== second.shift) return shiftOrder[first.shift] - shiftOrder[second.shift]
+  return first.order - second.order
 }
 
 function countRecommendationJobsAfterDate(recommendation: PlannerRecommendation, stagedJobIds: Set<string>, startDate: string) {
@@ -2823,18 +3103,23 @@ function parseBoolean(value: unknown) {
   return ['true', '1', 'yes', 'ja', 'x'].includes(value.trim().toLowerCase())
 }
 
-function mergeOpenPlanDates(current: Set<string>, jobs: Job[]) {
-  const next = new Set(current)
+function findBauteilTemplate(projekt: string, artikelNummer: string) {
+  const normalizedProjekt = normalizeTemplateKey(projekt)
+  const normalizedArtikel = normalizeArticleNumber(artikelNummer)
 
-  if (next.size === 0) {
-    next.add(plannerDate)
-  }
+  return bauteilTemplates.find(
+    (template) =>
+      normalizeTemplateKey(template.projekt) === normalizedProjekt &&
+      normalizeArticleNumber(template.artikelNummer) === normalizedArtikel,
+  )
+}
 
-  for (const job of jobs) {
-    next.add(job.date)
-  }
+function normalizeTemplateKey(value: string) {
+  return value.trim().toUpperCase()
+}
 
-  return next
+function normalizeArticleNumber(value: string) {
+  return value.trim().replace(/^ART\.?\s*/i, '').toUpperCase()
 }
 
 function readStoredJobPoolIds(): Set<string> {
@@ -2854,6 +3139,98 @@ function storeJobPoolIds(jobIds: Set<string>) {
   } catch {
     // If local storage is unavailable, the UI still works for the current session.
   }
+}
+
+function readStoredPlanOrder(): Map<string, PlanOrderEntry> {
+  try {
+    const rawValue = window.localStorage.getItem(planOrderStorageKey)
+    const parsedValue = rawValue ? JSON.parse(rawValue) : {}
+    const entries = Object.entries(parsedValue).filter((entry): entry is [string, PlanOrderEntry] => {
+      const value = entry[1] as Partial<PlanOrderEntry>
+
+      return (
+        typeof value === 'object' &&
+        typeof value.date === 'string' &&
+        typeof value.order === 'number' &&
+        typeof value.robotId === 'string' &&
+        isShiftCode(value.shift)
+      )
+    })
+
+    return new Map(entries)
+  } catch {
+    return new Map()
+  }
+}
+
+function storePlanOrder(planOrder: Map<string, PlanOrderEntry>) {
+  try {
+    window.localStorage.setItem(planOrderStorageKey, JSON.stringify(Object.fromEntries(planOrder)))
+  } catch {
+    // If local storage is unavailable, the saved backend plan still works.
+  }
+}
+
+function mergePlanOrder(
+  current: Map<string, PlanOrderEntry>,
+  robotId: string,
+  placements: Map<string, { date: string; order: number; shift: ShiftCode }>,
+) {
+  const next = new Map(current)
+
+  for (const [jobId, placement] of placements) {
+    next.set(jobId, {
+      date: placement.date,
+      order: placement.order,
+      robotId,
+      shift: placement.shift,
+    })
+  }
+
+  return next
+}
+
+function sortJobsWithPlanOrder(jobs: Job[], planOrder: Map<string, PlanOrderEntry>) {
+  const shiftOrder: Record<ShiftCode, number> = { N: 1, F: 2, S: 3 }
+
+  return [...jobs].sort((first, second) => {
+    if (first.date !== second.date) return first.date.localeCompare(second.date)
+    if (first.shift !== second.shift) return shiftOrder[first.shift] - shiftOrder[second.shift]
+
+    const firstOrder = getMatchingPlanOrder(first, planOrder)
+    const secondOrder = getMatchingPlanOrder(second, planOrder)
+
+    if (firstOrder && secondOrder && firstOrder.order !== secondOrder.order) {
+      return firstOrder.order - secondOrder.order
+    }
+
+    if (firstOrder && !secondOrder) return 1
+    if (!firstOrder && secondOrder) return -1
+
+    return sortJobs([first, second])[0].id === first.id ? -1 : 1
+  })
+}
+
+function getMatchingPlanOrder(job: Job, planOrder: Map<string, PlanOrderEntry>) {
+  const entry = planOrder.get(job.id)
+
+  if (typeof job.planOrder === 'number') {
+    return {
+      date: job.date,
+      order: job.planOrder,
+      robotId: job.robotId,
+      shift: job.shift,
+    }
+  }
+
+  if (!entry) return null
+  if (entry.robotId !== job.robotId || entry.date !== job.date || entry.shift !== job.shift) return null
+
+  return entry
+}
+
+function isShiftCode(value: unknown): value is ShiftCode {
+  return value === 'N' || value === 'F' || value === 'S'
 }
 
 function sortJobs(jobs: Job[]) {
@@ -2876,6 +3253,15 @@ function getJobCreatedAt(job: Job) {
   return (job as Job & { createdAt?: string }).createdAt ?? ''
 }
 
+function getTodayDateString() {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
 function formatPlanDate(date: string) {
   const parsedDate = new Date(`${date}T00:00:00`)
 
@@ -2887,6 +3273,19 @@ function formatPlanDate(date: string) {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+  }).format(parsedDate)
+}
+
+function formatShortPlanDate(date: string) {
+  const parsedDate = new Date(`${date}T00:00:00`)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return date
+  }
+
+  return new Intl.DateTimeFormat('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
   }).format(parsedDate)
 }
 

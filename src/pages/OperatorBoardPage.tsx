@@ -39,6 +39,13 @@ type OperatorNotice = {
   tone: 'error' | 'info' | 'success'
 }
 
+type OperatorPlanOrderEntry = {
+  date: string
+  order: number
+  robotId: string
+  shift: ShiftCode
+}
+
 type RepairDraft = {
   faNumber: string
   projekt: string
@@ -54,6 +61,7 @@ type RepairDraft = {
 }
 
 const plannerDate = '2026-06-08'
+const planOrderStorageKey = 'weekly-planner-plan-order'
 
 const shifts: { label: string; name: string; time: string; value: ShiftCode }[] = [
   { label: 'N', name: 'Nacht', time: '22:00 - 06:00', value: 'N' },
@@ -871,8 +879,21 @@ function findRobotFromRoute(robots: Robot[], routeRobotId?: string) {
 }
 
 function sortOperatorJobs(jobs: Job[]) {
+  const storedPlanOrder = readStoredOperatorPlanOrder()
+
   return [...jobs].sort((first, second) => {
     if (first.shift !== second.shift) return shiftOrder[first.shift] - shiftOrder[second.shift]
+
+    const firstOrder = getOperatorPlanOrder(first, storedPlanOrder)
+    const secondOrder = getOperatorPlanOrder(second, storedPlanOrder)
+
+    if (firstOrder && secondOrder && firstOrder.order !== secondOrder.order) {
+      return firstOrder.order - secondOrder.order
+    }
+
+    if (firstOrder && !secondOrder) return 1
+    if (!firstOrder && secondOrder) return -1
+
     if (first.status === 'running' && second.status !== 'running') return -1
     if (second.status === 'running' && first.status !== 'running') return 1
     if (first.carriedFromPreviousShift !== second.carriedFromPreviousShift) return first.carriedFromPreviousShift ? -1 : 1
@@ -882,6 +903,50 @@ function sortOperatorJobs(jobs: Job[]) {
     if (first.faNumber !== second.faNumber) return first.faNumber.localeCompare(second.faNumber)
     return first.schritt - second.schritt
   })
+}
+
+function getOperatorPlanOrder(job: Job, storedPlanOrder: Map<string, OperatorPlanOrderEntry>) {
+  if (typeof job.planOrder === 'number') {
+    return {
+      date: job.date,
+      order: job.planOrder,
+      robotId: job.robotId,
+      shift: job.shift,
+    }
+  }
+
+  const entry = storedPlanOrder.get(job.id)
+
+  if (!entry) return null
+  if (entry.robotId !== job.robotId || entry.date !== job.date || entry.shift !== job.shift) return null
+
+  return entry
+}
+
+function readStoredOperatorPlanOrder(): Map<string, OperatorPlanOrderEntry> {
+  try {
+    const rawValue = window.localStorage.getItem(planOrderStorageKey)
+    const parsedValue = rawValue ? JSON.parse(rawValue) : {}
+    const entries = Object.entries(parsedValue).filter((entry): entry is [string, OperatorPlanOrderEntry] => {
+      const value = entry[1] as Partial<OperatorPlanOrderEntry>
+
+      return (
+        typeof value === 'object' &&
+        typeof value.date === 'string' &&
+        typeof value.order === 'number' &&
+        typeof value.robotId === 'string' &&
+        isShiftCode(value.shift)
+      )
+    })
+
+    return new Map(entries)
+  } catch {
+    return new Map()
+  }
+}
+
+function isShiftCode(value: unknown): value is ShiftCode {
+  return value === 'N' || value === 'F' || value === 'S'
 }
 
 function getJobState(job: Job) {
@@ -974,7 +1039,26 @@ function clampNumber(value: number, min: number, max: number) {
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : 'Unbekannter Fehler'
+  const message = error instanceof Error ? error.message : 'Unbekannter Fehler'
+  const normalizedMessage = message.toLowerCase()
+
+  if (normalizedMessage.includes('must exist before') && normalizedMessage.includes('completed')) {
+    return 'Dieser Schritt kann noch nicht fertig gemeldet werden, weil ein vorheriger Schritt fuer diese FA noch nicht im Plan existiert. Bitte Supervisor bitten, die Bauteil-Kette anzulegen.'
+  }
+
+  if (normalizedMessage.includes('must be done before') && normalizedMessage.includes('completed')) {
+    return 'Dieser Schritt kann noch nicht fertig gemeldet werden, weil der vorherige Schritt noch nicht fertig ist.'
+  }
+
+  if (normalizedMessage.includes('must exist before') && normalizedMessage.includes('geheftet')) {
+    return 'Dieser Schritt kann noch nicht als schon geheftet markiert werden, weil ein vorheriger Schritt fuer diese FA noch nicht im Plan existiert. Bitte Supervisor bitten, die Bauteil-Kette anzulegen.'
+  }
+
+  if (normalizedMessage.includes('must be done before') && normalizedMessage.includes('geheftet')) {
+    return 'Dieser Schritt kann noch nicht als schon geheftet markiert werden, weil der vorherige Schritt noch nicht vom Roboter fertig gemeldet ist.'
+  }
+
+  return message
 }
 
 const shiftOrder: Record<ShiftCode, number> = { N: 1, F: 2, S: 3 }
